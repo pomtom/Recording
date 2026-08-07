@@ -80,6 +80,9 @@ public sealed class RecordingManager : IAsyncDisposable
     /// </summary>
     public Func<int, CancellationToken, Task>? CountdownHandler { get; set; }
 
+    /// <summary>Mutes or unmutes the microphone for the active recording session.</summary>
+    public void SetMicrophoneMuted(bool muted) => _session?.SetMicrophoneMuted(muted);
+
     // ---------------------------------------------------------------- commands
 
     public async Task StartAsync()

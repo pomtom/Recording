@@ -106,6 +106,13 @@
             <Button x:Name="StopButton"  Grid.Column="4" Style="{StaticResource Action}" Content="Stop" />
         </Grid>
 
+        <!-- Microphone mute (only meaningful while recording) -->
+        <Button x:Name="MuteMicButton"
+                Margin="0,0,0,10"
+                Style="{StaticResource Action}"
+                Content="🎤  Mute mic"
+                IsEnabled="False" />
+
         <Grid>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />

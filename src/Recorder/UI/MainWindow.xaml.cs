@@ -48,6 +48,7 @@ public partial class MainWindow : Window
         SettingsButton.Click += (_, _) => _settingsRequested();
         FolderButton.Click += (_, _) => OpenOutputFolder();
         ExitButton.Click += async (_, _) => await _exitRequested();
+        MuteMicButton.Click += (_, _) => ToggleMuteMic();
 
         _elapsedTimer = new DispatcherTimer(DispatcherPriority.Normal)
         {
@@ -74,6 +75,15 @@ public partial class MainWindow : Window
         SettingsButton.IsEnabled = state == RecorderState.Idle;
 
         PauseButton.Content = state == RecorderState.Paused ? "Resume" : "Pause";
+
+        var canMute = (state == RecorderState.Recording || state == RecorderState.Paused)
+                      && _settings.Current.RecordMicrophone;
+        MuteMicButton.IsEnabled = canMute;
+        if (!canMute)
+        {
+            MuteMicButton.Content = "🎤  Mute mic";
+            _manager.SetMicrophoneMuted(false);
+        }
 
         switch (state)
         {
@@ -151,6 +161,14 @@ public partial class MainWindow : Window
         var settings = _settings.Current;
         HotkeyText.Text = $"Start {settings.StartHotkey}   ·   Pause {settings.PauseHotkey}   ·   Stop {settings.StopHotkey}";
         OutputText.Text = "Saving to " + settings.OutputFolder;
+    }
+
+    private void ToggleMuteMic()
+    {
+        var muted = MuteMicButton.Tag is not true;
+        _manager.SetMicrophoneMuted(muted);
+        MuteMicButton.Tag = muted;
+        MuteMicButton.Content = muted ? "🎤  Unmute mic" : "🎤  Mute mic";
     }
 
     private void OpenOutputFolder()

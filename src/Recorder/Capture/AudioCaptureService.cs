@@ -105,6 +105,13 @@ public sealed class AudioCaptureService : IDisposable
         foreach (var source in _sources) source.Clear();
     }
 
+    public void SetMicrophoneMuted(bool muted)
+    {
+        foreach (var source in _sources)
+            if (source.Label == "Microphone")
+                source.IsMuted = muted;
+    }
+
     public void Stop()
     {
         foreach (var source in _sources)
@@ -133,12 +140,15 @@ public sealed class AudioSource : IDisposable
 {
     private readonly BufferedWaveProvider _buffer;
     private readonly object _gate = new();
+    private volatile bool _muted;
 
     public string Label { get; }
     public IWaveIn Capture { get; }
 
     /// <summary>48 kHz stereo float. Reads always return the full requested count.</summary>
     public ISampleProvider Output { get; }
+
+    public bool IsMuted { get => _muted; set => _muted = value; }
 
     public AudioSource(string label, IWaveIn capture, TimeSpan bufferDuration)
     {
@@ -205,7 +215,12 @@ public sealed class AudioSource : IDisposable
     /// <summary>Reads exactly <paramref name="count"/> samples, padding with silence if needed.</summary>
     public int Read(float[] destination, int offset, int count)
     {
-        lock (_gate) return Output.Read(destination, offset, count);
+        lock (_gate)
+        {
+            var read = Output.Read(destination, offset, count);
+            if (_muted) Array.Clear(destination, offset, read);
+            return read;
+        }
     }
 
     public void Clear()

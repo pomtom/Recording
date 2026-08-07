@@ -195,6 +195,8 @@ public sealed class RecordingSession : IAsyncDisposable
         _clock.Pause();
     }
 
+    public void SetMicrophoneMuted(bool muted) => _audio?.SetMicrophoneMuted(muted);
+
     public void Resume()
     {
         if (!_clock.IsPaused) return;
