@@ -6,3 +6,4 @@ publish/
 # Fetched by tools\fetch-ffmpeg.ps1 — ~80 MB, not source.
 src/Recorder/assets/ffmpeg.exe
 src/Recorder/assets/ffmpeg.exe.gz
+/.vs/Recorder/FileContentIndex
