@@ -1,0 +1,91 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- The Windows-versioned TFM is what brings in the WinRT projections for
+         Windows.Graphics.Capture. Do not drop the version suffix.
+         We compile against the 22621 projection so Windows 11 APIs such as
+         GraphicsCaptureSession.IsBorderRequired are visible, but keep the supported floor at
+         19041 (Windows 10 2004) so the app still runs there. Every 22000+ API is guarded with
+         OperatingSystem.IsWindowsVersionAtLeast, which the platform analyzer verifies. -->
+    <TargetFramework>net8.0-windows10.0.22621.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <RootNamespace>Recorder</RootNamespace>
+    <AssemblyName>Recorder</AssemblyName>
+    <UseWPF>true</UseWPF>
+    <!-- WinForms is pulled in only for NotifyIcon and Microsoft.Win32.SystemEvents. -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <Version>1.0.0</Version>
+    <Product>Pomtom Recorder</Product>
+    <AssemblyTitle>Pomtom Recorder</AssemblyTitle>
+    <Company>Pomtom</Company>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- WFAC010 asks for WinForms' ApplicationHighDpiMode property instead of a manifest entry.
+         That property emits an Application.SetHighDpiMode call, which runs after the process has
+         already started and is far too late for WPF; PerMonitorV2 has to come from the manifest.
+         WinForms is only here for the tray icon, so the manifest is the correct answer. -->
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
+  </PropertyGroup>
+
+  <!-- Single-file publish defaults. build.ps1 relies on these. -->
+  <PropertyGroup Condition="'$(Configuration)'=='Release'">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- Compression must stay OFF. A compressed single-file bundle is decompressed into memory in
+         its entirety at every launch, which with ffmpeg embedded costs ~200 MB of working set and
+         half a second of startup to save file size. Uncompressed, the bundle is memory-mapped and
+         untouched pages never load. The ffmpeg payload is gzipped individually instead, which
+         reclaims most of the size at no runtime cost — see FFmpegProvisioner. -->
+    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
+    <!-- InvariantGlobalization must stay OFF. WPF's font cache constructs CultureInfo("en") while
+         measuring text, which throws in invariant mode and takes down every window that renders a
+         character. It would save ~30 MB of ICU data and cost the entire UI. -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <!-- UseWindowsForms adds System.Windows.Forms and System.Drawing to the implicit usings, which
+       collide with WPF on Application, ComboBox, TextBox and friends. Only TrayManager needs
+       WinForms, and it imports them explicitly. -->
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NAudio" Version="2.3.0" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
+    <PackageReference Include="Serilog" Version="4.4.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+  </ItemGroup>
+
+  <!-- ffmpeg.exe.gz is fetched by tools\fetch-ffmpeg.ps1 and is not in source control.
+       Embedding is conditional so the project still builds before the fetch has run;
+       FFmpegProvisioner falls back to a side-by-side or PATH ffmpeg in that case. -->
+  <ItemGroup Condition="Exists('assets\ffmpeg.exe.gz')">
+    <EmbeddedResource Include="assets\ffmpeg.exe.gz">
+      <LogicalName>Recorder.assets.ffmpeg.exe.gz</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('assets\app.ico')">
+    <Resource Include="assets\app.ico" />
+  </ItemGroup>
+
+  <PropertyGroup Condition="Exists('assets\app.ico')">
+    <ApplicationIcon>assets\app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+</Project>
