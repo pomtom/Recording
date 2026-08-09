@@ -1,6 +1,8 @@
 using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
+using System.Collections.Generic;
+using System.Linq;
 using Recorder.Capture;
 using Recorder.Core;
 using Recorder.Encoding;
@@ -100,6 +102,10 @@ public partial class App : Application
         _settings = new SettingsManager();
         _settings.Load();
 
+        // Logging came up with defaults before this point, because Load itself reports a corrupt
+        // settings file. Now that the user's preferences are known, apply them.
+        Log.Reconfigure(_settings.Current.Logging);
+
         _provisioner = new FFmpegProvisioner();
         _encoderProbe = new EncoderProbe(_provisioner);
         _finalizer = new Mp4Finalizer(_provisioner);
@@ -113,32 +119,61 @@ public partial class App : Application
         _hotkeys = new GlobalHotkeyManager();
         _hotkeys.Pressed += OnHotkeyPressed;
         _hotkeys.RegistrationFailed += (_, message) => OnUi(() => _tray?.ShowWarning("Hotkey unavailable", message));
-
-        var current = _settings.Current;
-        _hotkeys.Apply(current.StartHotkey, current.PauseHotkey, current.StopHotkey);
+        _hotkeys.Apply(BuildHotkeyMap(_settings.Current));
 
         _settings.Changed += (_, updated) => OnUi(() =>
         {
-            _hotkeys.Apply(updated.StartHotkey, updated.PauseHotkey, updated.StopHotkey);
+            _hotkeys.Apply(BuildHotkeyMap(updated));
+            Log.Reconfigure(updated.Logging);
+            StartupRegistration.Apply(updated.Behavior.StartWithWindows);
             _mainWindow?.RefreshSettingsText();
+            _mainWindow?.ApplyState(_manager.State);
         });
 
         _power = new PowerEventMonitor(
             isRecording: () => _manager.State.IsActive(),
+            shouldStop: ShouldStopFor,
             stopAsync: async reason =>
             {
                 await _manager.StopAsync().ConfigureAwait(false);
                 OnUi(() => _tray?.ShowInfo("Recording stopped", $"Saved because the system went to {reason}."));
             });
         _power.Start();
+
+        StartupRegistration.Apply(_settings.Current.Behavior.StartWithWindows);
+    }
+
+    private static Dictionary<HotkeyAction, string> BuildHotkeyMap(AppSettings settings) => new()
+    {
+        [HotkeyAction.Start] = settings.StartHotkey,
+        [HotkeyAction.PauseResume] = settings.PauseHotkey,
+        [HotkeyAction.Stop] = settings.StopHotkey,
+        [HotkeyAction.MuteMicrophone] = settings.MuteMicHotkey,
+        [HotkeyAction.MuteSystemAudio] = settings.MuteSystemHotkey,
+    };
+
+    /// <summary>Whether the user wants a recording stopped for this particular system event.</summary>
+    private bool ShouldStopFor(PowerStopReason reason)
+    {
+        var behavior = _settings.Current.Behavior;
+        return reason switch
+        {
+            PowerStopReason.Sleep => behavior.StopOnSleep,
+            PowerStopReason.Lock => behavior.StopOnLock,
+            PowerStopReason.LogOff => behavior.StopOnLogOff,
+            PowerStopReason.Shutdown => behavior.StopOnShutdown,
+            _ => true,
+        };
     }
 
     private void BuildUi()
     {
-        _tray = new TrayManager();
+        _tray = new TrayManager(() => _settings.Current.Behavior);
         _tray.StartRequested += async (_, _) => await _manager.StartAsync();
         _tray.PauseRequested += async (_, _) => await _manager.TogglePauseAsync();
         _tray.StopRequested += async (_, _) => await _manager.StopAsync();
+        _tray.MuteMicrophoneRequested += (_, _) => _manager.ToggleMute(AudioSourceKind.Microphone);
+        _tray.MuteSystemAudioRequested += (_, _) => _manager.ToggleMute(AudioSourceKind.SystemAudio);
         _tray.OpenRequested += (_, _) => OnUi(ShowMainWindow);
         _tray.ExitRequested += async (_, _) => await ExitAsync();
         _tray.ApplyState(_manager.State);
@@ -149,7 +184,15 @@ public partial class App : Application
             settingsRequested: ShowSettingsWindow,
             exitRequested: ExitAsync);
 
-        _mainWindow.Show();
+        // Both surfaces track mute from the manager, so they cannot drift apart.
+        _manager.MuteChanged += (_, _) => OnUi(() =>
+        {
+            _mainWindow?.ApplyMuteState();
+            _tray?.ApplyMuteState(_manager.IsMicrophoneMuted, _manager.IsSystemAudioMuted);
+            _overlay?.SetMuted(_manager.IsMicrophoneMuted && _settings.Current.Overlay.ShowMuteState);
+        });
+
+        if (!_settings.Current.Behavior.StartMinimized) _mainWindow.Show();
     }
 
     /// <summary>Extracts ffmpeg, probes encoders and recovers interrupted recordings.</summary>
@@ -168,6 +211,8 @@ public partial class App : Application
                 "Recording will not work. Place ffmpeg.exe next to Recorder.exe."));
             return;
         }
+
+        if (!_settings.Current.Behavior.RecoverInterruptedRecordings) return;
 
         try
         {
@@ -213,12 +258,40 @@ public partial class App : Application
                 case HotkeyAction.Stop:
                     await _manager.StopAsync();
                     break;
+
+                case HotkeyAction.MuteMicrophone:
+                    ToggleMuteFromHotkey(AudioSourceKind.Microphone, "Microphone");
+                    break;
+
+                case HotkeyAction.MuteSystemAudio:
+                    ToggleMuteFromHotkey(AudioSourceKind.SystemAudio, "System audio");
+                    break;
             }
         }
         catch (Exception ex)
         {
             Log.Error(ex, $"Handling the {action} hotkey failed.");
         }
+    }
+
+    /// <summary>
+    /// Toggles a source's mute and says so, since the hotkey may have been pressed from another app.
+    /// </summary>
+    /// <remarks>
+    /// Mute only means anything while a recording is live. Pressing the key when idle is confirmed
+    /// with a notification rather than silently ignored — a key that appears to do nothing is
+    /// indistinguishable from one that failed to register.
+    /// </remarks>
+    private void ToggleMuteFromHotkey(AudioSourceKind kind, string label)
+    {
+        if (!_manager.State.IsActive())
+        {
+            _tray?.ShowInfo("Pomtom Recorder", $"{label} mute only applies while recording.");
+            return;
+        }
+
+        _manager.ToggleMute(kind);
+        _tray?.ShowInfo("Pomtom Recorder", $"{label} {(_manager.IsMuted(kind) ? "muted" : "unmuted")}.");
     }
 
     private void OnStateChanged(object? sender, RecordingStateChangedEventArgs e) => OnUi(() =>
@@ -262,7 +335,7 @@ public partial class App : Application
     {
         try
         {
-            var window = new SettingsWindow(_settings);
+            var window = new SettingsWindow(_settings, () => _manager.State.IsActive());
             if (_mainWindow is not null && _mainWindow.IsVisible) window.Owner = _mainWindow;
             window.ShowDialog();
         }
@@ -278,19 +351,27 @@ public partial class App : Application
     {
         try
         {
+            var settings = _settings.Current;
+            if (!settings.Overlay.Enabled)
+            {
+                HideOverlay();
+                return;
+            }
+
             if (_overlay is null)
             {
-                var settings = _settings.Current;
                 _overlay = new RecordingOverlayWindow(
                     elapsedProvider: () => _manager.Elapsed,
                     positionPersister: (left, top) => _settings.Update(s =>
                     {
                         s.OverlayLeft = left;
                         s.OverlayTop = top;
-                    }));
+                    }),
+                    options: settings.Overlay);
 
                 _overlay.Show();
                 _overlay.PlaceAt(settings.OverlayLeft, settings.OverlayTop, ResolveOverlayArea());
+                _overlay.SetMuted(_manager.IsMicrophoneMuted && settings.Overlay.ShowMuteState);
             }
 
             _overlay.SetState(state);

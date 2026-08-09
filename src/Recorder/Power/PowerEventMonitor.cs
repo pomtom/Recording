@@ -32,12 +32,23 @@ public sealed class PowerEventMonitor : IDisposable
 
     private readonly Func<PowerStopReason, Task> _stopAsync;
     private readonly Func<bool> _isRecording;
+    private readonly Func<PowerStopReason, bool> _shouldStop;
     private bool _subscribed;
     private bool _disposed;
 
-    public PowerEventMonitor(Func<bool> isRecording, Func<PowerStopReason, Task> stopAsync)
+    /// <param name="shouldStop">
+    /// Whether this particular event should end a recording. Each of the four is separately
+    /// configurable because the reasons are not equally compelling: a shutdown genuinely has to be
+    /// handled or the file is left unfinalized, while plenty of people lock their machine fully
+    /// expecting a long capture to keep running.
+    /// </param>
+    public PowerEventMonitor(
+        Func<bool> isRecording,
+        Func<PowerStopReason, bool> shouldStop,
+        Func<PowerStopReason, Task> stopAsync)
     {
         _isRecording = isRecording;
+        _shouldStop = shouldStop;
         _stopAsync = stopAsync;
     }
 
@@ -92,6 +103,12 @@ public sealed class PowerEventMonitor : IDisposable
         try
         {
             if (!_isRecording()) return;
+
+            if (!_shouldStop(reason))
+            {
+                Log.Warn($"A system {reason} event fired; leaving the recording running, as configured.");
+                return;
+            }
 
             Log.Warn($"Stopping the recording because of a system {reason} event.");
 

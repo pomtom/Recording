@@ -93,7 +93,7 @@ public sealed class RecordingSession : IAsyncDisposable
         // Capture first: its negotiated output size and pixel format determine the encoder spec.
         _capture = new ScreenCaptureService();
         _capture.CaptureLost += OnCaptureLost;
-        _capture.Start(_request.Monitor, _request.TargetHeight, _request.CaptureCursor);
+        _capture.Start(_request.Monitor, _request.TargetHeight, _request.CaptureCursor, _request.SuppressCaptureBorder);
 
         Width = _capture.TargetWidth;
         Height = _capture.TargetHeight;
@@ -108,6 +108,10 @@ public sealed class RecordingSession : IAsyncDisposable
             PixelFormat = _capture.PixelFormat,
             PartPath = _request.PartPath,
             AudioBitrateKbps = _request.AudioBitrateKbps,
+            AudioSampleRate = _request.Settings.Audio.SampleRate,
+            AudioChannels = _request.Settings.Audio.Channels,
+            Quality = _request.Quality,
+            MaxBitrateBps = _request.MaxBitrateBps,
             // Replaced per attempt inside FFmpegEncoder.StartAsync.
             VideoPipeName = "pomrec-v",
             AudioPipeName = "pomrec-a",
@@ -120,7 +124,7 @@ public sealed class RecordingSession : IAsyncDisposable
 
         EncoderDescription = EncoderProbe.FriendlyName(_encoder.ActiveEncoder);
 
-        _audio = new AudioCaptureService();
+        _audio = new AudioCaptureService(_request.Settings);
         _audio.Start(_request.RecordSystemAudio, _request.RecordMicrophone);
         AudioWarning = _audio.FailureSummary;
 
@@ -195,7 +199,7 @@ public sealed class RecordingSession : IAsyncDisposable
         _clock.Pause();
     }
 
-    public void SetMicrophoneMuted(bool muted) => _audio?.SetMicrophoneMuted(muted);
+    public void SetMuted(AudioSourceKind kind, bool muted) => _audio?.SetMuted(kind, muted);
 
     public void Resume()
     {

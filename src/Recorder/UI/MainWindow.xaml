@@ -57,6 +57,47 @@
             <Setter Property="FontFamily" Value="Segoe UI" />
             <Setter Property="FontSize" Value="11" />
         </Style>
+
+        <!-- A mute control has to answer "is it on?" at a glance, so muted is a distinct colour and
+             a distinct sublabel rather than only a caption swap. IsChecked carries the state; the
+             window never stores it separately. -->
+        <Style TargetType="ToggleButton" x:Key="MuteToggle">
+            <Setter Property="Height" Value="48" />
+            <Setter Property="Foreground" Value="#F2F2F2" />
+            <Setter Property="Background" Value="#2B2D31" />
+            <Setter Property="BorderBrush" Value="#3A3D42" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="FontFamily" Value="Segoe UI" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd"
+                                CornerRadius="6"
+                                Padding="10,6"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}">
+                            <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#4A2326" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#8E3B40" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.85" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.4" />
+                                <Setter Property="Cursor" Value="Arrow" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <StackPanel Margin="18">
@@ -106,12 +147,38 @@
             <Button x:Name="StopButton"  Grid.Column="4" Style="{StaticResource Action}" Content="Stop" />
         </Grid>
 
-        <!-- Microphone mute (only meaningful while recording) -->
-        <Button x:Name="MuteMicButton"
-                Margin="0,0,0,10"
-                Style="{StaticResource Action}"
-                Content="🎤  Mute mic"
-                IsEnabled="False" />
+        <!-- Mute toggles (only meaningful while recording) -->
+        <Grid Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="8" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <ToggleButton x:Name="MuteMicButton" Grid.Column="0" Style="{StaticResource MuteToggle}" IsEnabled="False">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock x:Name="MicGlyph" Text="🎤" FontSize="13" VerticalAlignment="Center" />
+                        <TextBlock Text="Microphone" Margin="6,0,0,0" FontSize="12"
+                                   Foreground="#F2F2F2" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <TextBlock x:Name="MicStatusText" Style="{StaticResource Caption}"
+                               Margin="0,2,0,0" Text="Live" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </ToggleButton>
+
+            <ToggleButton x:Name="MuteSystemButton" Grid.Column="2" Style="{StaticResource MuteToggle}" IsEnabled="False">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock x:Name="SystemGlyph" Text="🔊" FontSize="13" VerticalAlignment="Center" />
+                        <TextBlock Text="System audio" Margin="6,0,0,0" FontSize="12"
+                                   Foreground="#F2F2F2" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <TextBlock x:Name="SystemStatusText" Style="{StaticResource Caption}"
+                               Margin="0,2,0,0" Text="Live" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </ToggleButton>
+        </Grid>
 
         <Grid>
             <Grid.ColumnDefinitions>

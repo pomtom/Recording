@@ -2,8 +2,10 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
+using Recorder.Capture;
 using Recorder.Core;
 using Recorder.Settings;
 using Recorder.Utils;
@@ -48,7 +50,11 @@ public partial class MainWindow : Window
         SettingsButton.Click += (_, _) => _settingsRequested();
         FolderButton.Click += (_, _) => OpenOutputFolder();
         ExitButton.Click += async (_, _) => await _exitRequested();
-        MuteMicButton.Click += (_, _) => ToggleMuteMic();
+
+        // The toggles report intent; the manager owns the state and reports it back through
+        // ApplyMuteState. The button's own IsChecked is never the source of truth.
+        MuteMicButton.Click += (_, _) => _manager.SetMuted(AudioSourceKind.Microphone, MuteMicButton.IsChecked == true);
+        MuteSystemButton.Click += (_, _) => _manager.SetMuted(AudioSourceKind.SystemAudio, MuteSystemButton.IsChecked == true);
 
         _elapsedTimer = new DispatcherTimer(DispatcherPriority.Normal)
         {
@@ -76,14 +82,7 @@ public partial class MainWindow : Window
 
         PauseButton.Content = state == RecorderState.Paused ? "Resume" : "Pause";
 
-        var canMute = (state == RecorderState.Recording || state == RecorderState.Paused)
-                      && _settings.Current.RecordMicrophone;
-        MuteMicButton.IsEnabled = canMute;
-        if (!canMute)
-        {
-            MuteMicButton.Content = "🎤  Mute mic";
-            _manager.SetMicrophoneMuted(false);
-        }
+        ApplyMuteState();
 
         switch (state)
         {
@@ -159,16 +158,90 @@ public partial class MainWindow : Window
     public void RefreshSettingsText()
     {
         var settings = _settings.Current;
-        HotkeyText.Text = $"Start {settings.StartHotkey}   ·   Pause {settings.PauseHotkey}   ·   Stop {settings.StopHotkey}";
+
+        var hotkeys = new List<string>
+        {
+            $"Start {settings.StartHotkey}",
+            $"Pause {settings.PauseHotkey}",
+            $"Stop {settings.StopHotkey}",
+        };
+
+        // Only mention the mute keys when they are actually assigned; listing an empty one would
+        // read as a hotkey that exists but does nothing.
+        if (!string.IsNullOrWhiteSpace(settings.MuteMicHotkey))
+            hotkeys.Add($"Mute mic {settings.MuteMicHotkey}");
+        if (!string.IsNullOrWhiteSpace(settings.MuteSystemHotkey))
+            hotkeys.Add($"Mute system {settings.MuteSystemHotkey}");
+
+        HotkeyText.Text = string.Join("   ·   ", hotkeys);
         OutputText.Text = "Saving to " + settings.OutputFolder;
     }
 
-    private void ToggleMuteMic()
+    /// <summary>
+    /// Redraws both mute toggles from the manager's state.
+    /// </summary>
+    /// <remarks>
+    /// Called on every state change and whenever mute changes anywhere — window, tray or hotkey.
+    /// Reading the state rather than tracking it here is what keeps the three surfaces from
+    /// disagreeing.
+    /// </remarks>
+    public void ApplyMuteState()
     {
-        var muted = MuteMicButton.Tag is not true;
-        _manager.SetMicrophoneMuted(muted);
-        MuteMicButton.Tag = muted;
-        MuteMicButton.Content = muted ? "🎤  Unmute mic" : "🎤  Mute mic";
+        var settings = _settings.Current;
+        var live = _manager.State is RecorderState.Recording or RecorderState.Paused;
+
+        ApplyMuteToggle(
+            MuteMicButton, MicGlyph, MicStatusText,
+            enabled: live && settings.RecordMicrophone,
+            muted: _manager.IsMicrophoneMuted,
+            configured: settings.RecordMicrophone,
+            hotkey: settings.MuteMicHotkey,
+            liveGlyph: "🎤",
+            mutedGlyph: "🔇",
+            disabledReason: settings.RecordMicrophone ? "Only while recording" : "Off in Settings");
+
+        ApplyMuteToggle(
+            MuteSystemButton, SystemGlyph, SystemStatusText,
+            enabled: live && settings.RecordSystemAudio,
+            muted: _manager.IsSystemAudioMuted,
+            configured: settings.RecordSystemAudio,
+            hotkey: settings.MuteSystemHotkey,
+            liveGlyph: "🔊",
+            mutedGlyph: "🔇",
+            disabledReason: settings.RecordSystemAudio ? "Only while recording" : "Off in Settings");
+    }
+
+    private static void ApplyMuteToggle(
+        System.Windows.Controls.Primitives.ToggleButton button,
+        TextBlock glyph,
+        TextBlock status,
+        bool enabled,
+        bool muted,
+        bool configured,
+        string hotkey,
+        string liveGlyph,
+        string mutedGlyph,
+        string disabledReason)
+    {
+        button.IsEnabled = enabled;
+        button.IsChecked = muted;
+
+        glyph.Text = muted ? mutedGlyph : liveGlyph;
+
+        if (!enabled)
+        {
+            status.Text = disabledReason;
+            button.ToolTip = configured
+                ? "Available once a recording is running."
+                : "This source is switched off in Settings.";
+            return;
+        }
+
+        status.Text = string.IsNullOrWhiteSpace(hotkey)
+            ? (muted ? "Muted" : "Live")
+            : $"{(muted ? "Muted" : "Live")}  ·  {hotkey}";
+
+        button.ToolTip = muted ? "Click to unmute" : "Click to mute";
     }
 
     private void OpenOutputFolder()
@@ -196,7 +269,15 @@ public partial class MainWindow : Window
     {
         if (AllowClose) return;
 
-        // Per the spec, the close button minimises to the tray rather than exiting.
+        // The default is to minimise to the tray, per the spec, but a user who would rather the
+        // close button really closed can say so in Settings.
+        if (_settings.Current.Behavior.CloseButtonActionValue == CloseAction.Exit)
+        {
+            e.Cancel = true;
+            _ = _exitRequested();
+            return;
+        }
+
         e.Cancel = true;
         Hide();
     }

@@ -28,7 +28,13 @@
             Background="#E6161719"
             BorderBrush="#33FFFFFF"
             BorderThickness="1"
-            Cursor="SizeAll">
+            Cursor="SizeAll"
+            RenderTransformOrigin="0,0">
+        <Border.RenderTransform>
+            <!-- Driven by the Overlay.Scale setting. -->
+            <ScaleTransform x:Name="RootScale" ScaleX="1" ScaleY="1" />
+        </Border.RenderTransform>
+
         <Border.Effect>
             <DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.45" Color="#000000" />
         </Border.Effect>
@@ -52,6 +58,23 @@
                        FontFamily="Consolas, Segoe UI"
                        FontSize="13"
                        VerticalAlignment="Center" />
+
+            <!-- Only visible while the microphone is muted, so its presence is the whole message. -->
+            <Border x:Name="MuteBadge"
+                    Margin="8,0,0,0"
+                    Padding="6,1"
+                    CornerRadius="4"
+                    Background="#4DE83E3E"
+                    BorderBrush="#80E83E3E"
+                    BorderThickness="1"
+                    VerticalAlignment="Center"
+                    Visibility="Collapsed">
+                <TextBlock Text="MIC OFF"
+                           Foreground="#FFD4D4"
+                           FontFamily="Segoe UI"
+                           FontSize="10"
+                           FontWeight="SemiBold" />
+            </Border>
         </StackPanel>
     </Border>
 </Window>

@@ -97,6 +97,9 @@ public static class FFmpegArgumentBuilder
     private static IEnumerable<string> EncoderSpecificArguments(EncodeSpec spec, VideoEncoder encoder)
     {
         var bitrate = spec.VideoBitrate;
+        var quality = spec.Quality.ToString(CultureInfo.InvariantCulture);
+        var rate = bitrate.ToString(CultureInfo.InvariantCulture);
+        var buffer = (bitrate * 2).ToString(CultureInfo.InvariantCulture);
 
         return encoder switch
         {
@@ -107,33 +110,40 @@ public static class FFmpegArgumentBuilder
                 "-preset", "p4",
                 "-tune", "hq",
                 "-rc", "vbr",
-                "-cq", "23",
+                "-cq", quality,
                 "-b:v", "0",
-                "-maxrate", bitrate.ToString(CultureInfo.InvariantCulture),
-                "-bufsize", (bitrate * 2).ToString(CultureInfo.InvariantCulture),
+                "-maxrate", rate,
+                "-bufsize", buffer,
             ],
 
             // global_quality alone selects Quick Sync's ICQ mode; adding a maxrate on top pushes it
-            // back to plain CQP and the quality target is ignored.
+            // back to plain CQP and the quality target is ignored. That is why there is no -maxrate
+            // here even though every other encoder gets one.
             VideoEncoder.QuickSync =>
             [
                 "-preset", "medium",
-                "-global_quality", "23",
+                "-global_quality", quality,
             ],
 
+            // AMF splits the quantiser by frame type rather than taking a single value. P frames are
+            // given slightly less than I frames, which is the conventional split and matches how the
+            // other encoders distribute quality internally.
             VideoEncoder.Amf =>
             [
                 "-quality", "balanced",
                 "-rc", "cqp",
-                "-qp_i", "22",
-                "-qp_p", "24",
+                "-qp_i", quality,
+                "-qp_p", Math.Min(spec.Quality + 2, 51).ToString(CultureInfo.InvariantCulture),
+                "-maxrate", rate,
             ],
 
             // veryfast keeps a software fallback usable at 1080p60 on a mid-range CPU.
             _ =>
             [
                 "-preset", "veryfast",
-                "-crf", "21",
+                "-crf", quality,
+                "-maxrate", rate,
+                "-bufsize", buffer,
                 "-threads", "0",
             ],
         };

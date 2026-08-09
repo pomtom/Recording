@@ -34,6 +34,10 @@ public sealed class EncoderProbe
 
     private readonly FFmpegProvisioner _provisioner;
     private readonly object _gate = new();
+
+    /// <summary>Validation results for encoders the user asked for explicitly, so each is tested once.</summary>
+    private readonly Dictionary<VideoEncoder, bool> _overrideResults = [];
+
     private VideoEncoder? _cached;
 
     public EncoderProbe(FFmpegProvisioner provisioner) => _provisioner = provisioner;
@@ -67,6 +71,45 @@ public sealed class EncoderProbe
             _cached = chosen;
             return chosen;
         }
+    }
+
+    /// <summary>
+    /// Resolves an encoder, honouring an explicit choice when it works on this machine.
+    /// </summary>
+    /// <param name="requested">The user's override, or null to let the probe decide.</param>
+    /// <param name="warning">Set when the override was rejected, for the UI to relay.</param>
+    /// <remarks>
+    /// An override that this machine cannot actually run must never cost a recording, so it goes
+    /// through the same real encode test as the automatic path and quietly falls back if it fails.
+    /// The user is told, because silently ignoring what they asked for is worse than saying so.
+    /// </remarks>
+    public VideoEncoder Resolve(VideoEncoder? requested, out string? warning)
+    {
+        warning = null;
+        if (requested is null) return GetPreferredEncoder();
+
+        lock (_gate)
+        {
+            // Always usable, and validating it would only prove that ffmpeg starts.
+            if (requested.Value == VideoEncoder.X264) return VideoEncoder.X264;
+
+            if (_overrideResults.TryGetValue(requested.Value, out var known))
+            {
+                if (known) return requested.Value;
+            }
+            else
+            {
+                var usable = Validate(requested.Value);
+                _overrideResults[requested.Value] = usable;
+                if (usable) return requested.Value;
+            }
+        }
+
+        var fallback = GetPreferredEncoder();
+        warning = $"{FriendlyName(requested.Value)} is not usable on this machine; " +
+                  $"recording with {FriendlyName(fallback)} instead.";
+        Log.Warn(warning);
+        return fallback;
     }
 
     private VideoEncoder DetermineAndCache()

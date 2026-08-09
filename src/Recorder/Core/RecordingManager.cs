@@ -80,8 +80,55 @@ public sealed class RecordingManager : IAsyncDisposable
     /// </summary>
     public Func<int, CancellationToken, Task>? CountdownHandler { get; set; }
 
-    /// <summary>Mutes or unmutes the microphone for the active recording session.</summary>
-    public void SetMicrophoneMuted(bool muted) => _session?.SetMicrophoneMuted(muted);
+    // ---------------------------------------------------------------- mute
+
+    /// <summary>
+    /// Whether the microphone is currently silenced in the recording.
+    /// </summary>
+    /// <remarks>
+    /// The manager owns this rather than any one piece of UI. Mute can be changed from the window,
+    /// the tray menu or a global hotkey, and all three have to agree — a state that lives in
+    /// whichever control happened to be clicked last cannot give that guarantee.
+    /// </remarks>
+    public bool IsMicrophoneMuted { get; private set; }
+
+    public bool IsSystemAudioMuted { get; private set; }
+
+    /// <summary>Raised whenever either source's mute state changes, on the caller's thread.</summary>
+    public event EventHandler? MuteChanged;
+
+    public bool IsMuted(AudioSourceKind kind) =>
+        kind == AudioSourceKind.Microphone ? IsMicrophoneMuted : IsSystemAudioMuted;
+
+    /// <summary>Mutes or unmutes one source for the active recording.</summary>
+    public void SetMuted(AudioSourceKind kind, bool muted)
+    {
+        if (IsMuted(kind) == muted) return;
+
+        if (kind == AudioSourceKind.Microphone) IsMicrophoneMuted = muted;
+        else IsSystemAudioMuted = muted;
+
+        _session?.SetMuted(kind, muted);
+        RaiseMuteChanged();
+    }
+
+    public void ToggleMute(AudioSourceKind kind) => SetMuted(kind, !IsMuted(kind));
+
+    /// <summary>Clears both mute flags. Called as each recording starts.</summary>
+    private void ResetMute()
+    {
+        if (!IsMicrophoneMuted && !IsSystemAudioMuted) return;
+
+        IsMicrophoneMuted = false;
+        IsSystemAudioMuted = false;
+        RaiseMuteChanged();
+    }
+
+    private void RaiseMuteChanged()
+    {
+        try { MuteChanged?.Invoke(this, EventArgs.Empty); }
+        catch (Exception ex) { Log.Warn(ex, "A MuteChanged handler threw."); }
+    }
 
     // ---------------------------------------------------------------- commands
 
@@ -116,7 +163,10 @@ public sealed class RecordingManager : IAsyncDisposable
 
     private async Task StartCoreAsync()
     {
-        var settings = _settings.Current;
+        // A snapshot, so editing settings mid-recording cannot change a capture already running.
+        var settings = _settings.Current.Clone();
+
+        ResetMute();
 
         var monitor = MonitorEnumerator.Select(settings.MonitorDeviceId)
             ?? throw new InvalidOperationException("No display was found to record.");
@@ -130,22 +180,30 @@ public sealed class RecordingManager : IAsyncDisposable
             RaiseError($"'{settings.OutputFolder}' is not writable. Recordings will be saved to {folder.Path}.");
         }
 
-        var finalPath = OutputFolder.BuildRecordingPath(folder.Path, DateTime.Now);
+        var finalPath = OutputFolder.BuildRecordingPath(
+            folder.Path, DateTime.Now, settings.Naming.FilenameTemplate, monitor.FriendlyName);
         var partPath = finalPath + ".part";
+
+        var encoder = _encoderProbe.Resolve(ParseEncoderOverride(settings.Video.EncoderOverride), out var encoderWarning);
+        if (encoderWarning is not null) RaiseError(encoderWarning);
 
         var request = new RecordingRequest
         {
             Monitor = monitor,
-            TargetHeight = AppSettings.TargetHeight(settings.ResolutionPreset),
+            TargetHeight = settings.EffectiveTargetHeight,
             Fps = settings.FPS,
             CaptureCursor = settings.CaptureCursor,
+            SuppressCaptureBorder = settings.SuppressCaptureBorder,
             RecordSystemAudio = settings.RecordSystemAudio,
             RecordMicrophone = settings.RecordMicrophone,
             AudioBitrateKbps = settings.AudioBitrateKbps,
+            Settings = settings,
+            Quality = settings.Video.Quality,
+            MaxBitrateBps = ResolveMaxBitrate(settings.Video),
             FinalPath = finalPath,
             PartPath = partPath,
             FFmpegPath = _provisioner.GetFFmpegPath(),
-            Encoder = _encoderProbe.GetPreferredEncoder(),
+            Encoder = encoder,
         };
 
         SetState(RecorderState.CountingDown);
@@ -366,6 +424,23 @@ public sealed class RecordingManager : IAsyncDisposable
             }
         });
     }
+
+    /// <summary>The user's encoder choice, or null when they left it on Auto.</summary>
+    private static VideoEncoder? ParseEncoderOverride(string? value) =>
+        Enum.TryParse<VideoEncoder>(value, ignoreCase: true, out var encoder) ? encoder : null;
+
+    /// <summary>
+    /// The bitrate ceiling in bits per second, or 0 to let the frame height decide.
+    /// </summary>
+    /// <remarks>
+    /// In quality mode the configured ceiling is deliberately ignored: it exists as a safety valve
+    /// against a pathological scene, and letting a user's low ceiling silently override the quality
+    /// target they just chose would make the quality slider look broken.
+    /// </remarks>
+    private static long ResolveMaxBitrate(VideoSettings video) =>
+        video.QualityModeValue == VideoQualityMode.Bitrate && video.MaxBitrateKbps > 0
+            ? video.MaxBitrateKbps * 1000L
+            : 0;
 
     private static string DescribeStartFailure(Exception ex) => ex switch
     {

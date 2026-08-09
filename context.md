@@ -19,6 +19,23 @@ The application should behave like a native Windows utility rather than a full-f
 
 ---
 
+# Configurability Principle
+
+Every value in this document is a **default**, not a fixed behaviour. Anything a user could
+reasonably want to change is exposed in the Settings window and in `settings.json`, including the
+resolution, frame rate, countdown, audio devices, per-source gain, noise suppression, encoder
+quality, filename pattern, hotkeys, overlay appearance, startup behaviour, which system events end a
+recording, and log verbosity.
+
+Internal tuning that no user should have to reason about — mixer buffer sizes, the audio startup
+cushion, drain timeouts, GOP length, thread priorities — stays in code as named constants with the
+reasoning recorded alongside them.
+
+Settings are validated by clamping, never by rejection: a corrupt or hand-mangled file must never
+stop the application from starting.
+
+---
+
 # Primary Goals
 
 - Record the entire screen
@@ -226,6 +243,7 @@ User can change to:
 - 1080p
 - 1440p
 - Native Resolution
+- Custom height (240–4320; width follows the monitor's aspect ratio)
 
 ---
 
@@ -235,11 +253,26 @@ Default:
 
 60 FPS
 
-Allow:
+Allow any rate from 10 to 240 FPS. The Settings dropdown offers the common choices
+(24, 25, 30, 48, 50, 60, 120, 144); `settings.json` accepts any value in range.
 
-30 FPS
+---
 
-60 FPS
+## Encoder Quality
+
+Default:
+
+Quality index 23, constant-quality mode, automatic encoder selection.
+
+User can change:
+
+- Quality index (15 best — 35 smallest)
+- Quality mode (constant quality or target bitrate)
+- Bitrate ceiling (0 derives one from the frame height)
+- Encoder (Auto, NVENC, Quick Sync, AMF, x264)
+
+A manually chosen encoder is validated with a real test encode; if it cannot run on this machine the
+application reports it and falls back to the automatic choice rather than losing the recording.
 
 ---
 
@@ -269,6 +302,56 @@ Mix into:
 
 Single audio track
 
+Configurable:
+
+- Which device each source uses (default: follow the Windows default endpoint)
+- Per-source gain, −24 to +24 dB
+- Sample rate (44.1 or 48 kHz) and channels (mono or stereo)
+- Bitrate (64–320 kbps)
+
+---
+
+# Noise Cancellation
+
+Applied to the **microphone only**. System audio is program material; suppressing it would damage
+the recording.
+
+Chain, in order:
+
+1. High-pass filter — removes rumble below the speech band
+2. Spectral subtraction — removes steady broadband noise (fans, hiss, hum, room tone)
+3. Noise gate (downward expander) — finishes the job in the gaps between phrases
+4. Gain and ceiling — the user's level, the mute ramp, and a soft limiter
+
+Presets: Off · Light · Standard (default) · Strong · Custom
+
+Choosing a named preset writes its values into the individual parameters, so the configuration file
+always shows the numbers actually in effect and there is never a second, hidden source of truth.
+Every parameter is individually editable, which is what "Custom" means.
+
+Requirements:
+
+- Constant latency. The whole chain must add a fixed delay that never accumulates, or audio and
+  video would drift apart over a long recording.
+- Must never damage speech that begins the instant recording starts. The noise floor is therefore
+  estimated from a rolling minimum rather than an average, and suppression fades in over the first
+  second.
+- Must degrade to a no-op when disabled, with no measurable effect on the signal.
+
+---
+
+# Muting
+
+Microphone and system audio mute independently.
+
+Requirements:
+
+- Controllable from the main window, the tray menu and a global hotkey
+- All surfaces show the same state, owned in one place rather than by whichever control was used
+- Transitions are faded, not switched, so there is no click in the recording
+- Capture keeps running while muted, so unmuting is instant
+- Both sources start unmuted on every new recording
+
 ---
 
 # Default Save Location
@@ -283,7 +366,7 @@ The application remembers the last folder.
 
 # File Naming
 
-Format:
+Default format:
 
 ```
 YYYY-MM-DD_HH-MM-SS.mp4
@@ -294,6 +377,11 @@ Example:
 ```
 2026-08-07_09-35-20.mp4
 ```
+
+Configurable through a filename template accepting `{yyyy} {MM} {dd} {HH} {mm} {ss} {date} {time}
+{monitor} {counter}` plus literal text. Unknown tokens are left verbatim so a typo is visible rather
+than silently dropped; characters Windows forbids are stripped; a template that would produce
+nothing usable falls back to the default.
 
 ---
 
@@ -306,8 +394,18 @@ Buttons:
 - Start Recording
 - Pause
 - Stop
+- Mute microphone (toggle)
+- Mute system audio (toggle)
 - Settings
+- Open folder
 - Exit
+
+The mute toggles show their state visually — colour and label, not only a caption swap — along with
+the hotkey assigned to each, and explain why they are unavailable when they are.
+
+The Settings window is organised into tabs: **Capture · Audio · Video · Output · Hotkeys · General**.
+The Audio tab includes a live level meter under each device picker, so a wrongly-chosen or silent
+device can be spotted before recording rather than after.
 
 ---
 
@@ -326,6 +424,11 @@ Requirements:
 - Draggable
 - Transparent background
 - Does not appear in recording
+- Shows when the microphone is muted
+
+Configurable: shown or hidden, elapsed time shown or hidden, mute badge shown or hidden, opacity,
+size, pulse, and click-through. Click-through necessarily makes the indicator undraggable, since it
+never receives the mouse.
 
 ---
 
@@ -335,21 +438,32 @@ Closing the window should:
 
 Minimize to tray
 
-NOT exit.
+NOT exit — though this is configurable, and a user who wants the close button to really close can
+say so.
 
 Tray menu:
 
 - Start Recording
 - Pause
 - Stop
+- Mute microphone (checkable)
+- Mute system audio (checkable)
 - Open
 - Exit
+
+Notifications can be switched off, and their duration set.
 
 ---
 
 # Startup
 
-Do NOT start with Windows.
+Do NOT start with Windows, by default.
+
+Configurable. When enabled, the application registers itself under the per-user `Run` key — never
+HKLM, so no administrator rights are ever required. Because the application is portable, the
+registration is re-checked on every launch and corrected if the executable has moved.
+
+Starting minimised to the tray is separately configurable.
 
 ---
 
@@ -365,52 +479,56 @@ The application simply saves recordings.
 
 Global hotkeys.
 
-Default:
+Defaults:
 
-Start
-
-```
-Ctrl + Shift + R
-```
-
-Pause / Resume
-
-```
-Ctrl + Shift + P
-```
-
-Stop
-
-```
-Ctrl + Shift + S
-```
+| Action | Default |
+|---|---|
+| Start | `Ctrl + Shift + R` |
+| Pause / Resume | `Ctrl + Shift + P` |
+| Stop | `Ctrl + Shift + S` |
+| Mute microphone | `Ctrl + Shift + M` |
+| Mute system audio | *unassigned* |
 
 Requirements:
 
 - Configurable
 - Work globally
 - Work while minimized
+- The mute hotkeys may be left unassigned. Every global hotkey takes a combination away from every
+  other application on the machine, so the rarely-wanted one is opt-in.
 
 ---
 
 # Power Events
 
-Automatically stop recording when:
+By default, automatically stop recording when:
 
 - Windows sleeps
 - Windows locks
+- Windows signs out
 - Windows shuts down
 
 Gracefully finalize recording.
+
+Each of the four is individually switchable. They are not equally compelling: a shutdown genuinely
+has to be handled or the file is left unfinalized, whereas locking the screen is a judgement call and
+plenty of people expect a long capture to keep running.
 
 ---
 
 # Configuration File
 
-Example:
+JSON, hand-editable, with the full surface documented in `README.md`.
+
+Top-level keys carry the original settings; everything added since lives in a nested section
+(`Audio`, `NoiseSuppression`, `Video`, `Naming`, `Overlay`, `Behavior`, `Logging`). That split is not
+cosmetic — it is what lets an older configuration file load without a migration step, because the
+keys someone actually took the trouble to change never move, and a missing section simply takes its
+defaults.
 
 ```json
 {
+  "SettingsVersion": 2,
   "OutputFolder": "D:\\Recordings",
   "Resolution": "1080p",
   "FPS": 60,
@@ -420,7 +538,17 @@ Example:
   "RecordSystemAudio": true,
   "StartHotkey": "Ctrl+Shift+R",
   "PauseHotkey": "Ctrl+Shift+P",
-  "StopHotkey": "Ctrl+Shift+S"
+  "StopHotkey": "Ctrl+Shift+S",
+  "MuteMicHotkey": "Ctrl+Shift+M",
+  "MuteSystemHotkey": "",
+
+  "Audio":            { "MicrophoneDeviceId": null, "MicrophoneGainDb": 0.0, "Channels": 2 },
+  "NoiseSuppression": { "Enabled": true, "Preset": "Standard" },
+  "Video":            { "Quality": 23, "EncoderOverride": "Auto" },
+  "Naming":           { "FilenameTemplate": "{yyyy}-{MM}-{dd}_{HH}-{mm}-{ss}" },
+  "Overlay":          { "Enabled": true, "Opacity": 0.95 },
+  "Behavior":         { "StartWithWindows": false, "StopOnLock": true },
+  "Logging":          { "MinimumLevel": "Warning", "RetainedDays": 7 }
 }
 ```
 
@@ -437,7 +565,14 @@ ScreenRecorder/
 ├── Capture/
 │     ScreenCaptureService.cs
 │     AudioCaptureService.cs
-│     CountdownService.cs
+│     AudioDeviceEnumerator.cs
+│     AudioMixer.cs
+│     Dsp/
+│       HighPassProcessor.cs
+│       SpectralSubtractor.cs
+│       NoiseGate.cs
+│       GainStage.cs
+│       AudioProcessorChain.cs
 │
 ├── Recording/
 │     RecordingManager.cs
@@ -647,6 +782,8 @@ Although Version 1 is intentionally lightweight, the architecture should support
 
 Potential future enhancements:
 
+- Neural noise suppression (RNNoise via ffmpeg's `arnndn`, or a Windows Voice Clarity capture path)
+- Acoustic echo cancellation
 - Webcam recording
 - OCR (searchable screen text)
 - Speech-to-text transcription
@@ -731,9 +868,12 @@ The application is considered complete when it:
 - Requires no installation
 - Starts in under 2 seconds
 - Records the selected monitor at up to 1080p/60 FPS
-- Captures both system audio and microphone audio
+- Captures both system audio and microphone audio, from user-selected devices
 - Produces synchronized MP4 recordings
+- Cleans up microphone noise without damaging speech or A/V sync
+- Lets either audio source be muted mid-recording without a click in the output
 - Supports customizable global hotkeys
+- Exposes every user-facing behaviour in Settings, with nothing important hard-coded
 - Minimizes to the system tray
 - Uses minimal CPU and memory
 - Handles sleep, lock, and shutdown events gracefully

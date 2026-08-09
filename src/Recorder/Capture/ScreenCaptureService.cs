@@ -75,7 +75,8 @@ public sealed class ScreenCaptureService : IDisposable
     /// <paramref name="targetHeight"/> (width derived from the monitor's aspect ratio).
     /// </summary>
     /// <param name="targetHeight">Desired output height, or null to keep the native size.</param>
-    public void Start(MonitorInfo monitor, int? targetHeight, bool captureCursor)
+    /// <param name="suppressBorder">Hide the Windows 11 "being captured" border. No effect on Win10.</param>
+    public void Start(MonitorInfo monitor, int? targetHeight, bool captureCursor, bool suppressBorder = true)
     {
         ArgumentNullException.ThrowIfNull(monitor);
 
@@ -114,7 +115,7 @@ public sealed class ScreenCaptureService : IDisposable
             _framePool.FrameArrived += OnFrameArrived;
 
             _session = _framePool.CreateCaptureSession(_item);
-            ApplySessionOptions(_session, captureCursor);
+            ApplySessionOptions(_session, captureCursor, suppressBorder);
             _session.StartCapture();
 
             _started = true;
@@ -162,7 +163,7 @@ public sealed class ScreenCaptureService : IDisposable
         _winrtDevice = Direct3DInterop.CreateWinRtDevice(_device!);
     }
 
-    private static void ApplySessionOptions(GraphicsCaptureSession session, bool captureCursor)
+    private static void ApplySessionOptions(GraphicsCaptureSession session, bool captureCursor, bool suppressBorder)
     {
         try
         {
@@ -176,7 +177,7 @@ public sealed class ScreenCaptureService : IDisposable
         // Windows 11 draws a yellow "being captured" border around the recorded monitor. The
         // property that turns it off only exists on 22000+; on Windows 10 there is no border to
         // suppress in the first place.
-        if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
+        if (suppressBorder && OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
         {
             try
             {

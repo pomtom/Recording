@@ -8,6 +8,8 @@ public enum HotkeyAction
     Start,
     PauseResume,
     Stop,
+    MuteMicrophone,
+    MuteSystemAudio,
 }
 
 /// <summary>
@@ -65,23 +67,44 @@ public sealed class GlobalHotkeyManager : IDisposable
     /// <summary>
     /// Replaces the current registrations with the given set.
     /// </summary>
-    /// <remarks>Called at startup and again whenever the user edits the hotkeys in Settings.</remarks>
-    public void Apply(string startHotkey, string pauseHotkey, string stopHotkey)
+    /// <remarks>
+    /// Called at startup and again whenever the user edits the hotkeys in Settings. An entry whose
+    /// gesture is blank is skipped rather than reported as broken: the mute hotkeys are optional,
+    /// and "no key assigned" is a legitimate configuration, not a failure to complain about on every
+    /// single launch.
+    /// </remarks>
+    public void Apply(IReadOnlyDictionary<HotkeyAction, string> hotkeys)
     {
+        ArgumentNullException.ThrowIfNull(hotkeys);
         ObjectDisposedException.ThrowIf(_disposed, this);
         Initialize();
 
         UnregisterAll();
 
-        Register(HotkeyAction.Start, startHotkey, "Start recording");
-        Register(HotkeyAction.PauseResume, pauseHotkey, "Pause/resume");
-        Register(HotkeyAction.Stop, stopHotkey, "Stop recording");
+        var requested = 0;
+        foreach (var (action, text) in hotkeys)
+        {
+            if (string.IsNullOrWhiteSpace(text)) continue;
+
+            requested++;
+            Register(action, text, DescribeAction(action));
+        }
 
         // One line per launch, recorded on purpose: "my hotkey does nothing" is the most common
         // report there is, and knowing whether registration happened at all settles it instantly.
-        Log.Warn($"Hotkeys active ({_registered.Count}/3) on hwnd 0x{_source?.Handle.ToInt64():X}: " +
-                 $"start={startHotkey}, pause={pauseHotkey}, stop={stopHotkey}.");
+        var summary = string.Join(", ", hotkeys.Select(p => $"{p.Key}={(string.IsNullOrWhiteSpace(p.Value) ? "-" : p.Value)}"));
+        Log.Warn($"Hotkeys active ({_registered.Count}/{requested}) on hwnd 0x{_source?.Handle.ToInt64():X}: {summary}.");
     }
+
+    private static string DescribeAction(HotkeyAction action) => action switch
+    {
+        HotkeyAction.Start => "Start recording",
+        HotkeyAction.PauseResume => "Pause/resume",
+        HotkeyAction.Stop => "Stop recording",
+        HotkeyAction.MuteMicrophone => "Mute microphone",
+        HotkeyAction.MuteSystemAudio => "Mute system audio",
+        _ => action.ToString(),
+    };
 
     private void Register(HotkeyAction action, string text, string label)
     {

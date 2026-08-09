@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Settings"
-        Width="460"
+        Width="520"
         SizeToContent="Height"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner"
@@ -16,6 +16,14 @@
             <Setter Property="FontFamily" Value="Segoe UI" />
             <Setter Property="FontSize" Value="11" />
             <Setter Property="Margin" Value="0,0,0,4" />
+        </Style>
+
+        <Style TargetType="TextBlock" x:Key="SectionHeader">
+            <Setter Property="Foreground" Value="#F2F2F2" />
+            <Setter Property="FontFamily" Value="Segoe UI" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,10" />
         </Style>
 
         <Style TargetType="TextBlock" x:Key="Hint">
@@ -50,6 +58,18 @@
             <Setter Property="Margin" Value="0,0,0,8" />
         </Style>
 
+        <Style TargetType="RadioButton">
+            <Setter Property="Foreground" Value="#E3E5E8" />
+            <Setter Property="FontFamily" Value="Segoe UI" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Margin" Value="0,0,14,0" />
+        </Style>
+
+        <Style TargetType="Slider">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="IsSnapToTickEnabled" Value="True" />
+        </Style>
+
         <Style TargetType="Button" x:Key="Action">
             <Setter Property="Height" Value="32" />
             <Setter Property="MinWidth" Value="88" />
@@ -73,100 +93,496 @@
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="#35383D" />
                             </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.4" />
+                                <Setter Property="Cursor" Value="Arrow" />
+                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- WPF's stock tab strip is light-themed and cannot be recoloured with setters alone, so
+             the whole header is templated to match the rest of the window. -->
+        <Style TargetType="TabItem">
+            <Setter Property="Foreground" Value="#9AA0A6" />
+            <Setter Property="FontFamily" Value="Segoe UI" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="Bd"
+                                Padding="12,7"
+                                Margin="0,0,2,0"
+                                CornerRadius="6,6,0,0"
+                                Background="Transparent"
+                                BorderBrush="Transparent"
+                                BorderThickness="0,0,0,2">
+                            <ContentPresenter ContentSource="Header"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#232529" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#B33A3A" />
+                                <Setter Property="Foreground" Value="#F2F2F2" />
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsSelected" Value="False" />
+                                    <Condition Property="IsMouseOver" Value="True" />
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="Bd" Property="Background" Value="#202226" />
+                                <Setter Property="Foreground" Value="#D6D9DD" />
+                            </MultiTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="TabControl">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
+
+        <!-- Level meter: a plain ProgressBar restyled, so there is no custom control to maintain. -->
+        <Style TargetType="ProgressBar" x:Key="LevelMeter">
+            <Setter Property="Height" Value="6" />
+            <Setter Property="Minimum" Value="0" />
+            <Setter Property="Maximum" Value="1" />
+            <Setter Property="Background" Value="#232529" />
+            <Setter Property="Foreground" Value="#5FB86A" />
+            <Setter Property="BorderBrush" Value="#3A3D42" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
     </Window.Resources>
 
-    <StackPanel Margin="18">
+    <DockPanel Margin="18">
 
-        <TextBlock Text="Capture" Foreground="#F2F2F2" FontFamily="Segoe UI" FontSize="13"
-                   FontWeight="SemiBold" Margin="0,0,0,10" />
+        <!-- Footer first so it always reserves its space, whatever the tab height. -->
+        <StackPanel DockPanel.Dock="Bottom">
+            <TextBlock x:Name="ErrorText" Foreground="#E88A8A" FontFamily="Segoe UI" FontSize="11"
+                       TextWrapping="Wrap" Margin="0,12,0,0" Visibility="Collapsed" />
 
-        <TextBlock Text="Monitor" Style="{StaticResource FieldLabel}" />
-        <ComboBox x:Name="MonitorCombo" Margin="0,0,0,12" />
-
-        <Grid Margin="0,0,0,12">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="12" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="12" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-
-            <StackPanel Grid.Column="0">
-                <TextBlock Text="Resolution" Style="{StaticResource FieldLabel}" />
-                <ComboBox x:Name="ResolutionCombo" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+                <Button x:Name="ResetButton" Style="{StaticResource Action}" Content="Reset to defaults"
+                        MinWidth="120" Margin="0,0,8,0" />
+                <Button x:Name="CancelButton" Style="{StaticResource Action}" Content="Cancel" Margin="0,0,8,0" />
+                <Button x:Name="SaveButton" Style="{StaticResource Action}" Content="Save" />
             </StackPanel>
-
-            <StackPanel Grid.Column="2">
-                <TextBlock Text="Frame rate" Style="{StaticResource FieldLabel}" />
-                <ComboBox x:Name="FpsCombo" />
-            </StackPanel>
-
-            <StackPanel Grid.Column="4">
-                <TextBlock Text="Countdown" Style="{StaticResource FieldLabel}" />
-                <ComboBox x:Name="CountdownCombo" />
-            </StackPanel>
-        </Grid>
-
-        <CheckBox x:Name="CursorCheck" Content="Include the mouse cursor" />
-        <CheckBox x:Name="SystemAudioCheck" Content="Record system audio" />
-        <CheckBox x:Name="MicrophoneCheck" Content="Record microphone" />
-
-        <TextBlock Text="Save location" Foreground="#F2F2F2" FontFamily="Segoe UI" FontSize="13"
-                   FontWeight="SemiBold" Margin="0,10,0,10" />
-
-        <Grid>
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="8" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <TextBox x:Name="FolderBox" Grid.Column="0" />
-            <Button x:Name="BrowseButton" Grid.Column="2" Style="{StaticResource Action}" Content="Browse…" MinWidth="76" />
-        </Grid>
-        <TextBlock x:Name="FolderHint" Style="{StaticResource Hint}" />
-
-        <TextBlock Text="Hotkeys" Foreground="#F2F2F2" FontFamily="Segoe UI" FontSize="13"
-                   FontWeight="SemiBold" Margin="0,14,0,10" />
-
-        <Grid Margin="0,0,0,2">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="12" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="12" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-
-            <StackPanel Grid.Column="0">
-                <TextBlock Text="Start" Style="{StaticResource FieldLabel}" />
-                <TextBox x:Name="StartHotkeyBox" IsReadOnly="True" Cursor="Hand" />
-            </StackPanel>
-
-            <StackPanel Grid.Column="2">
-                <TextBlock Text="Pause / resume" Style="{StaticResource FieldLabel}" />
-                <TextBox x:Name="PauseHotkeyBox" IsReadOnly="True" Cursor="Hand" />
-            </StackPanel>
-
-            <StackPanel Grid.Column="4">
-                <TextBlock Text="Stop" Style="{StaticResource FieldLabel}" />
-                <TextBox x:Name="StopHotkeyBox" IsReadOnly="True" Cursor="Hand" />
-            </StackPanel>
-        </Grid>
-        <TextBlock Style="{StaticResource Hint}"
-                   Text="Click a box and press the combination you want. A modifier (Ctrl, Alt, Shift or Win) is required. Press Esc to cancel." />
-
-        <TextBlock x:Name="ErrorText" Foreground="#E88A8A" FontFamily="Segoe UI" FontSize="11"
-                   TextWrapping="Wrap" Margin="0,12,0,0" Visibility="Collapsed" />
-
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
-            <Button x:Name="CancelButton" Style="{StaticResource Action}" Content="Cancel" Margin="0,0,8,0" />
-            <Button x:Name="SaveButton" Style="{StaticResource Action}" Content="Save" />
         </StackPanel>
-    </StackPanel>
+
+        <TabControl x:Name="Tabs">
+
+            <!-- ==================================================== Capture -->
+            <TabItem Header="Capture">
+                <StackPanel Margin="2,16,2,0">
+                    <TextBlock Text="Monitor" Style="{StaticResource FieldLabel}" />
+                    <ComboBox x:Name="MonitorCombo" Margin="0,0,0,12" />
+
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Resolution" Style="{StaticResource FieldLabel}" />
+                            <ComboBox x:Name="ResolutionCombo" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Frame rate" Style="{StaticResource FieldLabel}" />
+                            <ComboBox x:Name="FpsCombo" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="4">
+                            <TextBlock Text="Countdown (s)" Style="{StaticResource FieldLabel}" />
+                            <TextBox x:Name="CountdownBox" />
+                        </StackPanel>
+                    </Grid>
+
+                    <StackPanel x:Name="CustomHeightPanel" Margin="0,0,0,12" Visibility="Collapsed">
+                        <TextBlock Text="Custom height (pixels)" Style="{StaticResource FieldLabel}" />
+                        <TextBox x:Name="CustomHeightBox" />
+                        <TextBlock Style="{StaticResource Hint}"
+                                   Text="Width follows the monitor's aspect ratio automatically. 240 to 4320." />
+                    </StackPanel>
+
+                    <CheckBox x:Name="CursorCheck" Content="Include the mouse cursor" />
+                    <CheckBox x:Name="BorderCheck" Content="Hide the Windows 11 &quot;being captured&quot; border" />
+                    <CheckBox x:Name="SystemAudioCheck" Content="Record system audio" />
+                    <CheckBox x:Name="MicrophoneCheck" Content="Record microphone" />
+                </StackPanel>
+            </TabItem>
+
+            <!-- ====================================================== Audio -->
+            <TabItem Header="Audio">
+                <StackPanel Margin="2,16,2,0">
+
+                    <TextBlock Text="Microphone" Style="{StaticResource SectionHeader}" />
+                    <ComboBox x:Name="MicDeviceCombo" Margin="0,0,0,8" />
+
+                    <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="60" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="56" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Gain" Style="{StaticResource FieldLabel}"
+                                   VerticalAlignment="Center" Margin="0" />
+                        <Slider Grid.Column="1" x:Name="MicGainSlider" Minimum="-24" Maximum="24"
+                                TickFrequency="0.5" />
+                        <TextBlock Grid.Column="2" x:Name="MicGainText" Style="{StaticResource FieldLabel}"
+                                   VerticalAlignment="Center" Margin="8,0,0,0" Text="0.0 dB" />
+                    </Grid>
+
+                    <ProgressBar x:Name="MicMeter" Style="{StaticResource LevelMeter}" />
+                    <TextBlock x:Name="MicMeterHint" Style="{StaticResource Hint}" Text="Live input level" />
+
+                    <TextBlock Text="Noise cancellation" Style="{StaticResource SectionHeader}" Margin="0,16,0,8" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <RadioButton x:Name="NsOffRadio" GroupName="Ns" Content="Off" />
+                        <RadioButton x:Name="NsLightRadio" GroupName="Ns" Content="Light" />
+                        <RadioButton x:Name="NsStandardRadio" GroupName="Ns" Content="Standard" />
+                        <RadioButton x:Name="NsStrongRadio" GroupName="Ns" Content="Strong" />
+                        <RadioButton x:Name="NsCustomRadio" GroupName="Ns" Content="Custom" />
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="Applies to the microphone only. Removes steady noise — fans, hum, hiss — and leaves speech alone." />
+
+                    <Expander x:Name="NsAdvanced" Header="Advanced parameters" Margin="0,10,0,0"
+                              Foreground="#9AA0A6" FontFamily="Segoe UI" FontSize="11">
+                        <StackPanel Margin="0,10,0,0">
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="High-pass (Hz, 0 = off)" Style="{StaticResource FieldLabel}" />
+                                    <TextBox x:Name="NsHighPassBox" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Strength (0 – 2)" Style="{StaticResource FieldLabel}" />
+                                    <TextBox x:Name="NsStrengthBox" />
+                                </StackPanel>
+                            </Grid>
+
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Suppression floor (dB)" Style="{StaticResource FieldLabel}" />
+                                    <TextBox x:Name="NsFloorBox" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Gate threshold (dB)" Style="{StaticResource FieldLabel}" />
+                                    <TextBox x:Name="NsGateThresholdBox" />
+                                </StackPanel>
+                            </Grid>
+
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Gate ratio" Style="{StaticResource FieldLabel}" />
+                                    <TextBox x:Name="NsGateRatioBox" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Attack (ms)" Style="{StaticResource FieldLabel}" />
+                                    <TextBox x:Name="NsAttackBox" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="4">
+                                    <TextBlock Text="Release (ms)" Style="{StaticResource FieldLabel}" />
+                                    <TextBox x:Name="NsReleaseBox" />
+                                </StackPanel>
+                            </Grid>
+
+                            <CheckBox x:Name="NsAdaptiveCheck" Content="Keep tracking the noise floor while recording" />
+
+                            <TextBlock Text="Mute fade (ms)" Style="{StaticResource FieldLabel}" />
+                            <TextBox x:Name="MuteRampBox" />
+                            <TextBlock Style="{StaticResource Hint}"
+                                       Text="Fading rather than cutting is what stops a click at each end of a muted stretch." />
+                        </StackPanel>
+                    </Expander>
+
+                    <TextBlock Text="System audio" Style="{StaticResource SectionHeader}" Margin="0,16,0,8" />
+                    <ComboBox x:Name="SystemDeviceCombo" Margin="0,0,0,8" />
+
+                    <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="60" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="56" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Gain" Style="{StaticResource FieldLabel}"
+                                   VerticalAlignment="Center" Margin="0" />
+                        <Slider Grid.Column="1" x:Name="SystemGainSlider" Minimum="-24" Maximum="24"
+                                TickFrequency="0.5" />
+                        <TextBlock Grid.Column="2" x:Name="SystemGainText" Style="{StaticResource FieldLabel}"
+                                   VerticalAlignment="Center" Margin="8,0,0,0" Text="0.0 dB" />
+                    </Grid>
+
+                    <ProgressBar x:Name="SystemMeter" Style="{StaticResource LevelMeter}" />
+                    <TextBlock x:Name="SystemMeterHint" Style="{StaticResource Hint}" Text="Live output level" />
+
+                    <TextBlock Text="Track format" Style="{StaticResource SectionHeader}" Margin="0,16,0,8" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Sample rate" Style="{StaticResource FieldLabel}" />
+                            <ComboBox x:Name="SampleRateCombo" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Channels" Style="{StaticResource FieldLabel}" />
+                            <ComboBox x:Name="ChannelsCombo" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="4">
+                            <TextBlock Text="Bitrate (kbps)" Style="{StaticResource FieldLabel}" />
+                            <ComboBox x:Name="AudioBitrateCombo" />
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </TabItem>
+
+            <!-- ====================================================== Video -->
+            <TabItem Header="Video">
+                <StackPanel Margin="2,16,2,0">
+                    <TextBlock Text="Quality" Style="{StaticResource SectionHeader}" />
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <RadioButton x:Name="QualityModeRadio" GroupName="QualityMode"
+                                     Content="Constant quality" />
+                        <RadioButton x:Name="BitrateModeRadio" GroupName="QualityMode"
+                                     Content="Target bitrate" />
+                    </StackPanel>
+
+                    <Grid Margin="0,0,0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="40" />
+                        </Grid.ColumnDefinitions>
+                        <Slider Grid.Column="0" x:Name="QualitySlider" Minimum="15" Maximum="35"
+                                TickFrequency="1" />
+                        <TextBlock Grid.Column="1" x:Name="QualityText" Style="{StaticResource FieldLabel}"
+                                   VerticalAlignment="Center" Margin="8,0,0,0" Text="23" />
+                    </Grid>
+                    <Grid Margin="0,0,0,12">
+                        <TextBlock Text="Better quality, larger file" HorizontalAlignment="Left"
+                                   Style="{StaticResource Hint}" Margin="0" />
+                        <TextBlock Text="Smaller file" HorizontalAlignment="Right"
+                                   Style="{StaticResource Hint}" Margin="0" />
+                    </Grid>
+
+                    <TextBlock Text="Bitrate ceiling (kbps, 0 = automatic)" Style="{StaticResource FieldLabel}" />
+                    <TextBox x:Name="MaxBitrateBox" Margin="0,0,0,2" />
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="In constant-quality mode this is only a safety valve; the quality setting drives the file size." />
+
+                    <TextBlock Text="Encoder" Style="{StaticResource SectionHeader}" Margin="0,16,0,8" />
+                    <ComboBox x:Name="EncoderCombo" />
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="Automatic tests each hardware encoder once and picks the best that works. A manual choice that turns out to be unusable falls back to the automatic one." />
+                </StackPanel>
+            </TabItem>
+
+            <!-- ===================================================== Output -->
+            <TabItem Header="Output">
+                <StackPanel Margin="2,16,2,0">
+                    <TextBlock Text="Save location" Style="{StaticResource SectionHeader}" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="FolderBox" Grid.Column="0" />
+                        <Button x:Name="BrowseButton" Grid.Column="2" Style="{StaticResource Action}"
+                                Content="Browse…" MinWidth="76" />
+                    </Grid>
+
+                    <TextBlock Text="Filename" Style="{StaticResource SectionHeader}" Margin="0,16,0,8" />
+                    <TextBox x:Name="TemplateBox" />
+                    <TextBlock x:Name="TemplatePreview" Style="{StaticResource Hint}" />
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="Tokens: {yyyy} {MM} {dd} {HH} {mm} {ss} {date} {time} {monitor} {counter}. Anything else is used literally." />
+
+                    <TextBlock Text="Recovery" Style="{StaticResource SectionHeader}" Margin="0,16,0,8" />
+                    <CheckBox x:Name="RecoveryCheck"
+                              Content="Finish recordings left behind by a crash on the next launch" />
+                </StackPanel>
+            </TabItem>
+
+            <!-- ==================================================== Hotkeys -->
+            <TabItem Header="Hotkeys">
+                <StackPanel Margin="2,16,2,0">
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Start" Style="{StaticResource FieldLabel}" />
+                            <TextBox x:Name="StartHotkeyBox" IsReadOnly="True" Cursor="Hand" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Pause / resume" Style="{StaticResource FieldLabel}" />
+                            <TextBox x:Name="PauseHotkeyBox" IsReadOnly="True" Cursor="Hand" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="4">
+                            <TextBlock Text="Stop" Style="{StaticResource FieldLabel}" />
+                            <TextBox x:Name="StopHotkeyBox" IsReadOnly="True" Cursor="Hand" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Mute microphone" Style="{StaticResource FieldLabel}" />
+                            <TextBox x:Name="MuteMicHotkeyBox" IsReadOnly="True" Cursor="Hand" />
+                        </StackPanel>
+                        <Button Grid.Column="1" x:Name="ClearMuteMicButton" Style="{StaticResource Action}"
+                                Content="Clear" MinWidth="52" Height="28" Margin="6,15,0,0" />
+
+                        <StackPanel Grid.Column="3">
+                            <TextBlock Text="Mute system audio" Style="{StaticResource FieldLabel}" />
+                            <TextBox x:Name="MuteSystemHotkeyBox" IsReadOnly="True" Cursor="Hand" />
+                        </StackPanel>
+                        <Button Grid.Column="4" x:Name="ClearMuteSystemButton" Style="{StaticResource Action}"
+                                Content="Clear" MinWidth="52" Height="28" Margin="6,15,0,0" />
+                    </Grid>
+
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="Click a box and press the combination you want. A modifier (Ctrl, Alt, Shift or Win) is required. Press Esc to cancel. The two mute keys are optional — Clear leaves one unassigned." />
+                </StackPanel>
+            </TabItem>
+
+            <!-- ==================================================== General -->
+            <TabItem Header="General">
+                <StackPanel Margin="2,16,2,0">
+                    <TextBlock Text="Startup and window" Style="{StaticResource SectionHeader}" />
+                    <CheckBox x:Name="StartWithWindowsCheck" Content="Start Pomtom Recorder with Windows" />
+                    <CheckBox x:Name="StartMinimizedCheck" Content="Start minimised to the tray" />
+
+                    <TextBlock Text="Close button" Style="{StaticResource FieldLabel}" Margin="0,4,0,4" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                        <RadioButton x:Name="CloseToTrayRadio" GroupName="Close" Content="Minimise to tray" />
+                        <RadioButton x:Name="CloseExitsRadio" GroupName="Close" Content="Exit the app" />
+                    </StackPanel>
+
+                    <TextBlock Text="Notifications" Style="{StaticResource SectionHeader}" Margin="0,14,0,8" />
+                    <CheckBox x:Name="NotificationsCheck" Content="Show tray notifications" />
+                    <TextBlock Text="Duration (ms)" Style="{StaticResource FieldLabel}" />
+                    <TextBox x:Name="NotificationDurationBox" />
+
+                    <TextBlock Text="Recording indicator" Style="{StaticResource SectionHeader}" Margin="0,14,0,8" />
+                    <CheckBox x:Name="OverlayEnabledCheck" Content="Show the floating REC indicator" />
+                    <CheckBox x:Name="OverlayElapsedCheck" Content="Show the elapsed time" />
+                    <CheckBox x:Name="OverlayMuteCheck" Content="Show when the microphone is muted" />
+                    <CheckBox x:Name="OverlayPulseCheck" Content="Pulse the dot while recording" />
+                    <CheckBox x:Name="OverlayClickThroughCheck" Content="Let clicks pass through the indicator" />
+                    <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,8"
+                               Text="Click-through also makes the indicator undraggable — it never receives the mouse." />
+
+                    <Grid Margin="0,0,0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="60" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="48" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Opacity" Style="{StaticResource FieldLabel}"
+                                   VerticalAlignment="Center" Margin="0" />
+                        <Slider Grid.Column="1" x:Name="OverlayOpacitySlider" Minimum="0.2" Maximum="1"
+                                TickFrequency="0.05" />
+                        <TextBlock Grid.Column="2" x:Name="OverlayOpacityText" Style="{StaticResource FieldLabel}"
+                                   VerticalAlignment="Center" Margin="8,0,0,0" />
+                    </Grid>
+
+                    <Grid Margin="0,0,0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="60" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="48" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Size" Style="{StaticResource FieldLabel}"
+                                   VerticalAlignment="Center" Margin="0" />
+                        <Slider Grid.Column="1" x:Name="OverlayScaleSlider" Minimum="0.75" Maximum="2"
+                                TickFrequency="0.05" />
+                        <TextBlock Grid.Column="2" x:Name="OverlayScaleText" Style="{StaticResource FieldLabel}"
+                                   VerticalAlignment="Center" Margin="8,0,0,0" />
+                    </Grid>
+
+                    <TextBlock Text="Stop recording automatically when Windows…" Style="{StaticResource SectionHeader}"
+                               Margin="0,14,0,8" />
+                    <CheckBox x:Name="StopOnSleepCheck" Content="…goes to sleep" />
+                    <CheckBox x:Name="StopOnLockCheck" Content="…locks the screen" />
+                    <CheckBox x:Name="StopOnLogOffCheck" Content="…signs out" />
+                    <CheckBox x:Name="StopOnShutdownCheck" Content="…shuts down" />
+                    <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,4"
+                               Text="Turning off the shutdown case risks leaving a recording unfinalized; it would then be repaired on the next launch." />
+
+                    <TextBlock Text="Logging" Style="{StaticResource SectionHeader}" Margin="0,14,0,8" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Level" Style="{StaticResource FieldLabel}" />
+                            <ComboBox x:Name="LogLevelCombo" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Keep (days)" Style="{StaticResource FieldLabel}" />
+                            <TextBox x:Name="LogRetentionBox" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="4">
+                            <TextBlock Text="Max size (MB)" Style="{StaticResource FieldLabel}" />
+                            <TextBox x:Name="LogSizeBox" />
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
 </Window>

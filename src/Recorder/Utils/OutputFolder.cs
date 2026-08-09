@@ -60,19 +60,33 @@ public static class OutputFolder
         }
     }
 
-    /// <summary>The spec's naming scheme: <c>YYYY-MM-DD_HH-MM-SS.mp4</c>, de-duplicated if needed.</summary>
-    public static string BuildRecordingPath(string folder, DateTime localTime)
+    /// <summary>
+    /// Builds the path for a new recording from the user's filename template.
+    /// </summary>
+    /// <remarks>
+    /// The default template reproduces the spec's <c>YYYY-MM-DD_HH-MM-SS.mp4</c> exactly. If the
+    /// expanded name is already taken, <c>{counter}</c> is re-expanded with the next index — so a
+    /// template that mentions the counter puts it where the user asked for it, and one that does not
+    /// gets it appended.
+    /// </remarks>
+    public static string BuildRecordingPath(string folder, DateTime localTime, string? template = null, string? monitorLabel = null)
     {
-        var stem = localTime.ToString("yyyy-MM-dd_HH-mm-ss");
-        var candidate = System.IO.Path.Combine(folder, stem + ".mp4");
+        // A template that places {counter} itself expands to a different name each pass, so appending
+        // a second suffix on top would read as "recording_3_3". One or the other, not both.
+        var templatesCounter = (template ?? FilenameTemplate.Default)
+            .Contains("{counter}", StringComparison.OrdinalIgnoreCase);
 
-        // Two recordings started in the same second would otherwise collide.
-        var suffix = 2;
-        while (File.Exists(candidate) || File.Exists(candidate + ".part"))
+        for (var counter = 1; counter < 10_000; counter++)
         {
-            candidate = System.IO.Path.Combine(folder, $"{stem}_{suffix}.mp4");
-            suffix++;
+            var stem = FilenameTemplate.Expand(template, localTime, monitorLabel, counter);
+            var name = templatesCounter || counter == 1 ? stem : $"{stem}_{counter}";
+            var candidate = System.IO.Path.Combine(folder, name + ".mp4");
+
+            if (!File.Exists(candidate) && !File.Exists(candidate + ".part")) return candidate;
         }
-        return candidate;
+
+        // Pathological: ten thousand collisions. A timestamp with sub-second precision always wins.
+        var unique = localTime.ToString("yyyy-MM-dd_HH-mm-ss-fff");
+        return System.IO.Path.Combine(folder, unique + ".mp4");
     }
 }

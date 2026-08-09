@@ -39,6 +39,20 @@ public sealed record EncodeSpec
     public int AudioChannels { get; init; } = 2;
     public int AudioBitrateKbps { get; init; } = 192;
 
+    /// <summary>
+    /// Quality index, lower being better. Handed to whichever knob the chosen encoder exposes.
+    /// </summary>
+    /// <remarks>
+    /// The four encoders spell this differently — <c>-cq</c>, <c>-global_quality</c>,
+    /// <c>-qp_i</c>/<c>-qp_p</c>, <c>-crf</c> — but they agree closely enough on what a given number
+    /// means that one value across all of them is honest, and it spares the user from having to know
+    /// which encoder the probe settled on.
+    /// </remarks>
+    public int Quality { get; init; } = 23;
+
+    /// <summary>Bitrate ceiling in bits per second. 0 derives one from the frame height.</summary>
+    public long MaxBitrateBps { get; init; }
+
     public int FinalWidth => EncodedWidth ?? Width;
     public int FinalHeight => EncodedHeight ?? Height;
 
@@ -50,16 +64,19 @@ public sealed record EncodeSpec
         : Width * Height * 4;
 
     /// <summary>
-    /// Video bitrate ceiling in bits per second, scaled from the frame height.
+    /// Video bitrate ceiling in bits per second.
     /// </summary>
     /// <remarks>
-    /// Screen content is mostly static with occasional full-frame changes, so these sit a little
-    /// above typical camera-video guidance to keep text crisp during scrolling.
+    /// An explicit <see cref="MaxBitrateBps"/> wins outright. Otherwise it is scaled from the frame
+    /// height: screen content is mostly static with occasional full-frame changes, so these sit a
+    /// little above typical camera-video guidance to keep text crisp during scrolling.
     /// </remarks>
     public long VideoBitrate
     {
         get
         {
+            if (MaxBitrateBps > 0) return MaxBitrateBps;
+
             long baseRate = FinalHeight switch
             {
                 <= 720 => 8_000_000,
@@ -67,7 +84,11 @@ public sealed record EncodeSpec
                 <= 1440 => 26_000_000,
                 _ => 45_000_000,
             };
-            return Fps <= 30 ? (long)(baseRate * 0.7) : baseRate;
+
+            // Frame rate scales the ceiling either way: a 120 FPS capture genuinely needs more
+            // headroom than the 60 the ladder was written for, and 30 needs less.
+            var scale = Fps <= 30 ? 0.7 : Fps <= 60 ? 1.0 : 1.0 + ((Fps - 60) / 60.0 * 0.5);
+            return (long)(baseRate * scale);
         }
     }
 }

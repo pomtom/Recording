@@ -2,6 +2,7 @@ using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
 using Recorder.Core;
+using Recorder.Settings;
 using Recorder.Utils;
 
 namespace Recorder.Tray;
@@ -21,8 +22,11 @@ public sealed class TrayManager : IDisposable
     private readonly ToolStripMenuItem _startItem;
     private readonly ToolStripMenuItem _pauseItem;
     private readonly ToolStripMenuItem _stopItem;
+    private readonly ToolStripMenuItem _muteMicItem;
+    private readonly ToolStripMenuItem _muteSystemItem;
     private readonly ToolStripMenuItem _openItem;
     private readonly ToolStripMenuItem _exitItem;
+    private readonly Func<BehaviorSettings> _behavior;
 
     private Icon? _ownedIcon;
     private bool _disposed;
@@ -30,14 +34,34 @@ public sealed class TrayManager : IDisposable
     public event EventHandler? StartRequested;
     public event EventHandler? PauseRequested;
     public event EventHandler? StopRequested;
+    public event EventHandler? MuteMicrophoneRequested;
+    public event EventHandler? MuteSystemAudioRequested;
     public event EventHandler? OpenRequested;
     public event EventHandler? ExitRequested;
 
-    public TrayManager()
+    /// <param name="behavior">
+    /// Read on each notification rather than captured once, so toggling notifications in Settings
+    /// takes effect without rebuilding the tray icon.
+    /// </param>
+    public TrayManager(Func<BehaviorSettings> behavior)
     {
+        _behavior = behavior;
+
         _startItem = new ToolStripMenuItem("Start recording", null, (_, _) => Raise(StartRequested));
         _pauseItem = new ToolStripMenuItem("Pause", null, (_, _) => Raise(PauseRequested));
         _stopItem = new ToolStripMenuItem("Stop", null, (_, _) => Raise(StopRequested));
+
+        // Checked rather than caption-swapped: a tick reads as state, whereas a label that changes
+        // between "Mute" and "Unmute" makes the reader work out which one describes the action.
+        _muteMicItem = new ToolStripMenuItem("Mute microphone", null, (_, _) => Raise(MuteMicrophoneRequested))
+        {
+            CheckOnClick = false,
+        };
+        _muteSystemItem = new ToolStripMenuItem("Mute system audio", null, (_, _) => Raise(MuteSystemAudioRequested))
+        {
+            CheckOnClick = false,
+        };
+
         _openItem = new ToolStripMenuItem("Open", null, (_, _) => Raise(OpenRequested));
         _exitItem = new ToolStripMenuItem("Exit", null, (_, _) => Raise(ExitRequested));
 
@@ -46,6 +70,9 @@ public sealed class TrayManager : IDisposable
             _startItem,
             _pauseItem,
             _stopItem,
+            new ToolStripSeparator(),
+            _muteMicItem,
+            _muteSystemItem,
             new ToolStripSeparator(),
             _openItem,
             _exitItem,
@@ -72,6 +99,11 @@ public sealed class TrayManager : IDisposable
         _stopItem.Enabled = state.CanStop();
         _pauseItem.Text = state == RecorderState.Paused ? "Resume" : "Pause";
 
+        // Mute is meaningless outside a live recording.
+        var canMute = state == RecorderState.Recording || state == RecorderState.Paused;
+        _muteMicItem.Enabled = canMute;
+        _muteSystemItem.Enabled = canMute;
+
         var status = state switch
         {
             RecorderState.CountingDown => "Starting…",
@@ -85,6 +117,15 @@ public sealed class TrayManager : IDisposable
         _icon.Text = Truncate($"Pomtom Recorder — {status}", 63);
     }
 
+    /// <summary>Reflects the current mute state in the menu.</summary>
+    public void ApplyMuteState(bool microphoneMuted, bool systemAudioMuted)
+    {
+        if (_disposed) return;
+
+        _muteMicItem.Checked = microphoneMuted;
+        _muteSystemItem.Checked = systemAudioMuted;
+    }
+
     public void ShowInfo(string title, string message) => Notify(title, message, ToolTipIcon.Info);
 
     public void ShowWarning(string title, string message) => Notify(title, message, ToolTipIcon.Warning);
@@ -92,12 +133,26 @@ public sealed class TrayManager : IDisposable
     private void Notify(string title, string message, ToolTipIcon icon)
     {
         if (_disposed) return;
+
+        BehaviorSettings behavior;
+        try
+        {
+            behavior = _behavior();
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(ex, "Could not read the notification settings; showing the notification.");
+            behavior = new BehaviorSettings();
+        }
+
+        if (!behavior.ShowTrayNotifications) return;
+
         try
         {
             _icon.BalloonTipTitle = Truncate(title, 63);
             _icon.BalloonTipText = Truncate(message, 255);
             _icon.BalloonTipIcon = icon;
-            _icon.ShowBalloonTip(5000);
+            _icon.ShowBalloonTip(behavior.NotificationDurationMs);
         }
         catch (Exception ex)
         {

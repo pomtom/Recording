@@ -5,6 +5,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using Recorder.Core;
+using Recorder.Settings;
 using Recorder.Utils;
 
 namespace Recorder.Overlay;
@@ -22,15 +23,26 @@ public partial class RecordingOverlayWindow : Window
     private readonly DispatcherTimer _timer;
     private readonly Func<TimeSpan> _elapsedProvider;
     private readonly Action<double, double> _positionPersister;
+    private readonly OverlaySettings _options;
 
     private Storyboard? _pulse;
 
-    public RecordingOverlayWindow(Func<TimeSpan> elapsedProvider, Action<double, double> positionPersister)
+    public RecordingOverlayWindow(
+        Func<TimeSpan> elapsedProvider,
+        Action<double, double> positionPersister,
+        OverlaySettings options)
     {
         _elapsedProvider = elapsedProvider;
         _positionPersister = positionPersister;
+        _options = options;
 
         InitializeComponent();
+
+        Opacity = options.Opacity;
+        RootScale.ScaleX = options.Scale;
+        RootScale.ScaleY = options.Scale;
+
+        if (!options.ShowElapsed) TimeText.Visibility = Visibility.Collapsed;
 
         _timer = new DispatcherTimer(DispatcherPriority.Normal)
         {
@@ -51,11 +63,25 @@ public partial class RecordingOverlayWindow : Window
         CaptureExclusion.Exclude(handle);
         CaptureExclusion.MakeToolWindow(handle);
 
+        // Click-through and dragging are mutually exclusive by construction: a window that never
+        // receives the mouse cannot be picked up. The settings hint says as much.
+        if (_options.ClickThrough)
+        {
+            CaptureExclusion.MakeClickThrough(handle);
+            Root.Cursor = null;
+        }
+
         _pulse = TryFindResource("PulseStoryboard") as Storyboard;
         StartPulse();
 
         UpdateElapsed();
         _timer.Start();
+    }
+
+    /// <summary>Shows or hides the muted-microphone badge.</summary>
+    public void SetMuted(bool muted)
+    {
+        MuteBadge.Visibility = muted ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void OnClosed(object? sender, EventArgs e)
@@ -135,6 +161,12 @@ public partial class RecordingOverlayWindow : Window
 
     private void StartPulse()
     {
+        if (!_options.PulseWhileRecording)
+        {
+            Dot.Opacity = 1.0;
+            return;
+        }
+
         try { _pulse?.Begin(Dot, true); }
         catch (Exception ex) { Log.Warn(ex, "Could not start the overlay pulse."); }
     }

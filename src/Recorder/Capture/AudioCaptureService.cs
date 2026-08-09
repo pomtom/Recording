@@ -1,12 +1,21 @@
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
+using Recorder.Capture.Dsp;
+using Recorder.Settings;
 using Recorder.Utils;
 
 namespace Recorder.Capture;
 
+/// <summary>Which of the two things the recorder can listen to a source is.</summary>
+public enum AudioSourceKind
+{
+    Microphone,
+    SystemAudio,
+}
+
 /// <summary>
-/// Captures system audio and the microphone, normalising both to 48 kHz stereo float.
+/// Captures system audio and the microphone, normalising both to the mixer's common format.
 /// </summary>
 /// <remarks>
 /// <para>Each source is independent: a missing microphone, a muted output device or a driver that
@@ -18,18 +27,32 @@ namespace Recorder.Capture;
 /// goes quiet when no application is playing anything — reads return silence instead of short
 /// counts. The mixer therefore always gets exactly the number of samples it asked for, which is
 /// what keeps the audio timeline locked to the recording clock.</para>
+///
+/// <para>Each source ends in a <see cref="DspSampleProvider"/> carrying its gain, its mute state and,
+/// for the microphone only, the noise-suppression chain.</para>
 /// </remarks>
 public sealed class AudioCaptureService : IDisposable
 {
-    public const int SampleRate = 48_000;
-    public const int Channels = 2;
-
     /// <summary>How much audio each source may queue before old data is dropped.</summary>
     private static readonly TimeSpan BufferDuration = TimeSpan.FromSeconds(5);
 
+    private readonly AppSettings _settings;
     private readonly List<AudioSource> _sources = [];
     private readonly List<string> _failures = [];
     private bool _disposed;
+
+    public AudioCaptureService(AppSettings settings)
+    {
+        _settings = settings;
+        SampleRate = settings.Audio.SampleRate;
+        Channels = settings.Audio.Channels;
+    }
+
+    /// <summary>Mixer sample rate every source is resampled to.</summary>
+    public int SampleRate { get; }
+
+    /// <summary>Channel count every source is mapped to.</summary>
+    public int Channels { get; }
 
     /// <summary>The sources that opened successfully.</summary>
     public IReadOnlyList<AudioSource> Sources => _sources;
@@ -44,20 +67,25 @@ public sealed class AudioCaptureService : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (systemAudio) TryAddSource("System audio", CreateLoopbackCapture);
-        if (microphone) TryAddSource("Microphone", CreateMicrophoneCapture);
+        if (systemAudio) TryAddSource(AudioSourceKind.SystemAudio, "System audio", CreateLoopbackCapture);
+        if (microphone) TryAddSource(AudioSourceKind.Microphone, "Microphone", CreateMicrophoneCapture);
 
         if (!HasAnySource && (systemAudio || microphone))
             Log.Error("No audio source could be opened; the recording will be silent.");
     }
 
-    private void TryAddSource(string label, Func<IWaveIn> factory)
+    private void TryAddSource(AudioSourceKind kind, string label, Func<IWaveIn> factory)
     {
         IWaveIn? capture = null;
         try
         {
             capture = factory();
-            var source = new AudioSource(label, capture, BufferDuration);
+
+            var chainFactory = kind == AudioSourceKind.Microphone
+                ? () => AudioProcessorChain.ForMicrophone(SampleRate, _settings)
+                : (Func<AudioProcessorChain>)(() => AudioProcessorChain.ForSystemAudio(SampleRate, _settings));
+
+            var source = new AudioSource(kind, label, capture, BufferDuration, SampleRate, Channels, chainFactory);
             capture.StartRecording();
             _sources.Add(source);
         }
@@ -69,19 +97,15 @@ public sealed class AudioCaptureService : IDisposable
         }
     }
 
-    private static IWaveIn CreateLoopbackCapture()
+    private IWaveIn CreateLoopbackCapture()
     {
-        using var enumerator = new MMDeviceEnumerator();
-        var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia)
-            ?? throw new InvalidOperationException("No default playback device.");
+        var device = AudioDeviceEnumerator.GetDevice(_settings.Audio.SystemAudioDeviceId, DataFlow.Render);
         return new WasapiLoopbackCapture(device);
     }
 
-    private static IWaveIn CreateMicrophoneCapture()
+    private IWaveIn CreateMicrophoneCapture()
     {
-        using var enumerator = new MMDeviceEnumerator();
-        var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications)
-            ?? throw new InvalidOperationException("No default recording device.");
+        var device = AudioDeviceEnumerator.GetDevice(_settings.Audio.MicrophoneDeviceId, DataFlow.Capture);
         return new WasapiCapture(device);
     }
 
@@ -105,10 +129,11 @@ public sealed class AudioCaptureService : IDisposable
         foreach (var source in _sources) source.Clear();
     }
 
-    public void SetMicrophoneMuted(bool muted)
+    /// <summary>Mutes or unmutes one kind of source. Silently does nothing if it is not open.</summary>
+    public void SetMuted(AudioSourceKind kind, bool muted)
     {
         foreach (var source in _sources)
-            if (source.Label == "Microphone")
+            if (source.Kind == kind)
                 source.IsMuted = muted;
     }
 
@@ -135,23 +160,51 @@ public sealed class AudioCaptureService : IDisposable
     }
 }
 
-/// <summary>One capture device, resampled to the mixer's common format.</summary>
+/// <summary>One capture device, resampled and cleaned up into the mixer's common format.</summary>
 public sealed class AudioSource : IDisposable
 {
     private readonly BufferedWaveProvider _buffer;
+    private readonly DspSampleProvider _dsp;
     private readonly object _gate = new();
     private volatile bool _muted;
 
+    public AudioSourceKind Kind { get; }
+
     public string Label { get; }
+
     public IWaveIn Capture { get; }
 
-    /// <summary>48 kHz stereo float. Reads always return the full requested count.</summary>
-    public ISampleProvider Output { get; }
+    /// <summary>Resampled, cleaned, interleaved. Reads always return the full requested count.</summary>
+    public ISampleProvider Output => _dsp;
 
-    public bool IsMuted { get => _muted; set => _muted = value; }
-
-    public AudioSource(string label, IWaveIn capture, TimeSpan bufferDuration)
+    /// <summary>
+    /// Whether this source is silenced in the recording.
+    /// </summary>
+    /// <remarks>
+    /// Capture keeps running while muted. Stopping it instead would mean the device had to be
+    /// reopened on unmute, which takes long enough to be heard as a gap, and would leave the source
+    /// buffer to be re-primed mid-recording.
+    /// </remarks>
+    public bool IsMuted
     {
+        get => _muted;
+        set
+        {
+            _muted = value;
+            _dsp.SetMuted(value);
+        }
+    }
+
+    public AudioSource(
+        AudioSourceKind kind,
+        string label,
+        IWaveIn capture,
+        TimeSpan bufferDuration,
+        int sampleRate,
+        int channels,
+        Func<AudioProcessorChain> chainFactory)
+    {
+        Kind = kind;
         Label = label;
         Capture = capture;
 
@@ -164,34 +217,40 @@ public sealed class AudioSource : IDisposable
             ReadFully = true,
         };
 
-        Output = BuildChain(_buffer);
+        _dsp = BuildChain(_buffer, sampleRate, channels, chainFactory);
 
         capture.DataAvailable += OnDataAvailable;
         capture.RecordingStopped += OnRecordingStopped;
     }
 
-    private static ISampleProvider BuildChain(BufferedWaveProvider buffer)
+    private static DspSampleProvider BuildChain(
+        BufferedWaveProvider buffer, int sampleRate, int channels, Func<AudioProcessorChain> chainFactory)
     {
         ISampleProvider provider = buffer.ToSampleProvider();
 
-        var channels = buffer.WaveFormat.Channels;
-        if (channels == 1)
+        var sourceChannels = buffer.WaveFormat.Channels;
+        var sourceWasMono = sourceChannels == 1;
+
+        if (sourceChannels == 1 && channels > 1)
         {
             provider = new MonoToStereoSampleProvider(provider);
         }
-        else if (channels > AudioCaptureService.Channels)
+        else if (sourceChannels > 1 && channels == 1)
+        {
+            provider = new StereoToMonoSampleProvider(provider);
+        }
+        else if (sourceChannels > channels)
         {
             // Surround devices exist; take the front pair rather than refusing to record.
-            var multiplexer = new MultiplexingSampleProvider([provider], AudioCaptureService.Channels);
-            multiplexer.ConnectInputToOutput(0, 0);
-            multiplexer.ConnectInputToOutput(1, 1);
+            var multiplexer = new MultiplexingSampleProvider([provider], channels);
+            for (var i = 0; i < channels; i++) multiplexer.ConnectInputToOutput(i, i);
             provider = multiplexer;
         }
 
-        if (provider.WaveFormat.SampleRate != AudioCaptureService.SampleRate)
-            provider = new WdlResamplingSampleProvider(provider, AudioCaptureService.SampleRate);
+        if (provider.WaveFormat.SampleRate != sampleRate)
+            provider = new WdlResamplingSampleProvider(provider, sampleRate);
 
-        return provider;
+        return new DspSampleProvider(provider, chainFactory, sourceWasMono);
     }
 
     private void OnDataAvailable(object? sender, WaveInEventArgs e)
@@ -215,12 +274,8 @@ public sealed class AudioSource : IDisposable
     /// <summary>Reads exactly <paramref name="count"/> samples, padding with silence if needed.</summary>
     public int Read(float[] destination, int offset, int count)
     {
-        lock (_gate)
-        {
-            var read = Output.Read(destination, offset, count);
-            if (_muted) Array.Clear(destination, offset, read);
-            return read;
-        }
+        // Mute is applied inside the chain, as a ramp, so that it does not click.
+        lock (_gate) return Output.Read(destination, offset, count);
     }
 
     public void Clear()

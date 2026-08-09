@@ -1,3 +1,4 @@
+using Recorder.Capture.Dsp;
 using Recorder.Core;
 using Recorder.Utils;
 
@@ -19,14 +20,14 @@ namespace Recorder.Capture;
 /// </remarks>
 public sealed class AudioMixer : IDisposable
 {
-    private const int SampleRate = AudioCaptureService.SampleRate;
-    private const int Channels = AudioCaptureService.Channels;
-
     /// <summary>Mixer wake interval. Short enough to keep the pipe fed, long enough to stay cheap.</summary>
     private static readonly TimeSpan TickInterval = TimeSpan.FromMilliseconds(10);
 
-    /// <summary>Upper bound on one tick's work, so a stalled thread cannot produce a huge burst.</summary>
-    private const int MaxFramesPerTick = SampleRate / 4;   // 250 ms
+    private readonly int _sampleRate;
+    private readonly int _channels;
+
+    /// <summary>Upper bound on one tick's work (250 ms), so a stalled thread cannot burst.</summary>
+    private readonly int _maxFramesPerTick;
 
     /// <summary>
     /// Audio deliberately left queued when the clock starts.
@@ -72,6 +73,10 @@ public sealed class AudioMixer : IDisposable
         _capture = capture;
         _clock = clock;
         _writer = writer;
+
+        _sampleRate = capture.SampleRate;
+        _channels = capture.Channels;
+        _maxFramesPerTick = _sampleRate / 4;
     }
 
     /// <summary>Audio samples (per channel) written so far.</summary>
@@ -166,7 +171,7 @@ public sealed class AudioMixer : IDisposable
     }
 
     /// <summary>Total samples per channel that should exist by the current clock reading.</summary>
-    private long DueFrames() => (long)(_clock.Elapsed.TotalSeconds * SampleRate);
+    private long DueFrames() => (long)(_clock.Elapsed.TotalSeconds * _sampleRate);
 
     /// <summary>Emits however many samples the clock says are now due. Returns false to stop the thread.</summary>
     private bool PumpOnce()
@@ -174,10 +179,10 @@ public sealed class AudioMixer : IDisposable
         var deficit = DueFrames() - Interlocked.Read(ref _framesWritten);
         if (deficit <= 0) return true;
 
-        var frames = (int)Math.Min(deficit, MaxFramesPerTick);
+        var frames = (int)Math.Min(deficit, _maxFramesPerTick);
         EnsureCapacity(frames);
 
-        var samples = frames * Channels;
+        var samples = frames * _channels;
         Array.Clear(_mixBuffer, 0, samples);
 
         foreach (var source in _capture.Sources)
@@ -210,7 +215,7 @@ public sealed class AudioMixer : IDisposable
 
     private void EnsureCapacity(int frames)
     {
-        var samples = frames * Channels;
+        var samples = frames * _channels;
         if (_mixBuffer.Length >= samples) return;
 
         _mixBuffer = new float[samples];
@@ -222,27 +227,16 @@ public sealed class AudioMixer : IDisposable
     /// Converts the float mix to little-endian 16-bit PCM, soft-clipping the loud parts.
     /// </summary>
     /// <remarks>
-    /// Summing two full-scale sources can exceed ±1.0. Hard clipping there produces harsh
-    /// distortion, so samples above the knee are curved into the ceiling instead — audibly a
-    /// gentle compression rather than a crackle. Below the knee the signal is untouched.
+    /// Summing two full-scale sources can exceed ±1.0, and hard clipping there produces harsh
+    /// distortion. <see cref="SoftClip"/> curves the overshoot into the ceiling instead; it is the
+    /// same curve each source's gain stage uses, so the two cannot disagree about what full scale
+    /// sounds like.
     /// </remarks>
     private static void ConvertToPcm16(float[] source, byte[] destination, int count)
     {
-        const float knee = 0.75f;
-        const float range = 1f - knee;
-
         for (var i = 0; i < count; i++)
         {
-            var value = source[i];
-            var magnitude = Math.Abs(value);
-
-            if (magnitude > knee)
-            {
-                var over = Math.Min((magnitude - knee) / range, 1f);
-                // Quadratic ease-out: continuous at the knee, asymptotic at 1.0.
-                magnitude = knee + (range * (over - (over * over * 0.5f)));
-                value = value < 0 ? -magnitude : magnitude;
-            }
+            var value = SoftClip.Apply(source[i]);
 
             var scaled = (int)MathF.Round(value * short.MaxValue);
             var sample = (short)Math.Clamp(scaled, short.MinValue, short.MaxValue);
