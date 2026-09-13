@@ -2,7 +2,7 @@
 
 A lightweight, portable Windows screen recorder. One `.exe`, no installer, no admin rights.
 Records a monitor with system audio and microphone mixed into a single track, and writes MP4
-(H.264 / AAC).
+(H.264 / AAC). Optionally composites a movable, resizable webcam bubble into the video.
 
 Windows 10 (2004 or newer) and Windows 11, 64-bit.
 
@@ -66,13 +66,13 @@ one under `%LOCALAPPDATA%`, so a USB stick can carry its own configuration.
 
 ## Settings
 
-Everything is editable in the Settings window — **Capture · Audio · Video · Output · Hotkeys ·
-General** — or by hand in `settings.json`. Nothing the app does is hard-coded; every value below is
+Everything is editable in the Settings window — **Capture · Camera · Audio · Video · Output ·
+Hotkeys · General** — or by hand in `settings.json`. Nothing the app does is hard-coded; every value below is
 a default, not a rule.
 
 ```json
 {
-  "SettingsVersion": 2,
+  "SettingsVersion": 3,
   "OutputFolder": "D:\\Recordings",
   "Resolution": "1080p",
   "CustomHeight": 1080,
@@ -97,6 +97,24 @@ a default, not a rule.
     "SystemAudioGainDb": 0.0,
     "SampleRate": 48000,
     "Channels": 2
+  },
+
+  "Camera": {
+    "Enabled": false,
+    "DeviceId": null,
+    "CaptureWidth": 1280,
+    "CaptureHeight": 720,
+    "Fps": 30,
+    "Shape": "Circle",
+    "Mirror": true,
+    "Left": null,
+    "Top": null,
+    "Size": 260,
+    "BorderThickness": 4,
+    "BorderColor": "#FFFFFFFF",
+    "Opacity": 1.0,
+    "SnapDistance": 160,
+    "SnapMargin": 32
   },
 
   "NoiseSuppression": {
@@ -161,6 +179,36 @@ a default, not a rule.
 - `SuppressCaptureBorder` — hides the yellow "being captured" border Windows 11 draws. No effect on
   Windows 10, which does not draw one.
 
+### Camera
+
+A floating bubble showing your webcam, recorded into the video at exactly the position and size you
+left it on screen. Drag it to move, drag the corner grip to resize, or right-click it for shape,
+size presets and corners. It is not a separate file and needs no editing afterwards.
+
+- `Enabled` — off by default. Turning it off closes the camera device, so the hardware light goes
+  out; this is a privacy control, not a visibility toggle. It can be switched at any time, including
+  mid-recording, and the screen recording continues uninterrupted either way.
+- `DeviceId` — a `MediaFrameSourceGroup` id. `null` uses the first camera found, and a remembered
+  camera that has been unplugged falls back to the first one rather than failing.
+- `CaptureWidth` / `CaptureHeight` / `Fps` — what to ask the camera for; the closest format it
+  actually offers is used. `Fps` is also how often a still screen is re-composited, so it is a cost
+  knob as well as a quality one. 30 is plenty for a talking head.
+- `Shape` — `Circle` (centre-cropped square) or `RoundedRect` (the camera's full field of view).
+- `Mirror` — one setting for the bubble **and** the recording. Meeting apps mirror the preview and
+  transmit un-mirrored, but they are not baking the preview into a file; two knobs here would let
+  you arrange a bubble that looks right and get a recording that does not.
+- `Left` / `Top` / `Size` / `BorderThickness` / `SnapDistance` / `SnapMargin` — all in **physical
+  pixels**, unlike `OverlayLeft`/`OverlayTop`. The bubble's rectangle is measured with
+  `GetWindowRect` and baked into the video, so it stays in one coordinate space end to end; that is
+  what keeps it in the right place on mixed-DPI setups.
+- `SnapDistance` — how near a corner a dropped bubble must land to snap there. `0` disables snapping
+  so the bubble stays exactly where it is put.
+
+The bubble window is hidden from screen capture, so the recording contains the composited camera and
+never the drag handles, the close button or the hover chrome. On a build of Windows too old to
+support that exclusion the bubble is hidden while recording instead, since otherwise the camera
+would appear twice.
+
 ### Audio and noise suppression
 
 - `MicrophoneDeviceId` / `SystemAudioDeviceId` — `null` follows the Windows default, which is what
@@ -211,6 +259,8 @@ Windows Graphics Capture (free-threaded frame pool)
    └─> D3D11 video processor: scale + BGRA→NV12 in one GPU pass
          └─> staging texture → three-buffer rotation
                └─> pacer thread @ fps ──> named pipe ─┐
+                     ▲                                 │
+MediaCapture ─> BGRA ─┘  (crop, mirror, mask, BT.709)   │
                                                        ├─> ffmpeg ──> .mp4.part (fragmented)
 WASAPI loopback ─> gain/mute ─┐                        │                    │
                               ├─> rings ────────────   │              remux -c copy
@@ -219,7 +269,7 @@ WASAPI mic ─> highpass ─> spectral ─> gate ─> gain/mute│              
                                               (sum, soft-clip, s16le)  <template>.mp4
 ```
 
-Four design points carry most of the weight:
+Five design points carry most of the weight:
 
 **One clock drives both streams.** The frame pacer emits frame *n* when the recording clock reaches
 `n / fps`, and the audio mixer emits exactly `elapsed × 48000` samples. Because both are positioned
@@ -232,6 +282,18 @@ changes, so the pacer repeats the last captured frame when nothing is happening.
 frame — in a raw CFR stream every frame occupies exactly 1/fps of the timeline, so dropping one
 would shorten the video against the audio. If the encoder falls behind, the pacer catches up by
 writing the missed frames rather than discarding them.
+
+**The camera is composited on the pacer thread, not where frames arrive.** This follows directly
+from the point above. If the bubble were blended when Windows delivered a capture frame, a static
+screen would deliver none — and someone talking over a motionless slide would record a *photograph*
+of themselves while the clock kept running. Blending after conversion, on the thread that writes
+every frame, makes that unrepresentable: each written frame samples the newest camera frame. The
+expensive part (crop, mirror, resample, mask, border, RGB→BT.709) happens once per camera frame and
+is cached; what runs per encoded frame is an integer lerp over the bubble's rectangle, most of which
+is opaque and so a straight row copy. A 300 px bubble in a 1080p frame touches ~154 KB, against the
+186 MB/s the pipeline already moves. A watchdog stops drawing if the camera goes quiet for two
+seconds, so a disconnected webcam drops the bubble instead of freezing a face into the rest of the
+recording.
 
 **The file is playable before it is finished.** During capture ffmpeg writes a *fragmented* MP4,
 which stays valid however abruptly it is truncated. A clean stop stream-copies it to a normal
@@ -255,8 +317,10 @@ latency that never accumulates, which is what makes it safe to put in the record
 
 - **One monitor per recording.** Windows Graphics Capture has no virtual-desktop capture item — this
   is an OS constraint, not a shortcut. Pick the monitor in Settings.
-- **The app's own windows never appear in recordings.** The overlay, countdown, main and settings
-  windows are excluded via `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`.
+- **The app's own windows never appear in recordings.** The overlay, countdown, camera bubble, main
+  and settings windows are excluded via `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`. The
+  camera you see in a recording is the composited copy, never the window — which is why the bubble's
+  drag handles and close button are absent from the file.
 - **Recording stops by itself** on sleep, lock, log-off and shutdown, finalizing the MP4 first. Each
   of the four is individually switchable in Settings.
 - **Hardware encoding is verified, not assumed.** At first launch each candidate encoder
@@ -264,6 +328,12 @@ latency that never accumulates, which is what makes it safe to put in the record
   because an encoder ffmpeg was *built* with can still be unusable on a given machine — an outdated
   NVIDIA driver, a disabled GPU, a busy encoder session. The result is cached. libx264 is the floor
   and always works.
+- **A camera failure never costs you the recording.** No camera, access denied by the Windows
+  privacy setting, the device held by another app, or a webcam unplugged mid-take — each drops the
+  bubble, says so, and leaves the screen recording running.
+- **The camera bubble is pulled onto the monitor being recorded** when a recording starts, if it was
+  parked on a different display. A bubble that simply never appeared would be indistinguishable from
+  the feature being broken.
 - **Audio devices are resolved when recording starts**, not tracked live. Switching your default
   microphone or speakers mid-recording has no effect until the next take.
 - **Settings are snapshotted at the moment a recording starts.** Editing them while one is running
@@ -316,12 +386,13 @@ without it and will then look for `ffmpeg.exe` beside the exe or on `PATH`.
 
 ```
 src/Recorder/
-  Core/       recording state machine, session, clock, frame pacer
+  Core/       recording state machine, session, clock, frame pacer, camera controller
   Capture/    Windows Graphics Capture, D3D11 interop, GPU frame conversion, audio capture + mixer
   Capture/Dsp/  microphone cleanup: high-pass, spectral subtraction, gate, gain and mute ramp
+              camera capture, bubble geometry, sprite bake and per-frame composite
   Encoding/   ffmpeg provisioning, encoder validation, argument building, process + pipes, remux
   Hotkeys/    global hotkey registration and gesture parsing
-  Overlay/    floating REC indicator, countdown
+  Overlay/    floating REC indicator, countdown, camera bubble
   UI/         main and settings windows
   Tray/       system tray icon and menu
   Power/      sleep / lock / shutdown handling

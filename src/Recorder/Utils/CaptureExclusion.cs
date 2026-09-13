@@ -38,20 +38,29 @@ public static class CaptureExclusion
         window.SourceInitialized += OnSourceInitialized;
     }
 
-    public static void Exclude(IntPtr hwnd)
+    /// <summary>Excludes a window from screen capture.</summary>
+    /// <returns>
+    /// False when the exclusion could not be applied, in which case the window <em>will</em> appear
+    /// in recordings. For the REC indicator that is a cosmetic degradation, but for the camera
+    /// bubble it is not: the bubble is also composited into the frame, so a caller that bakes its
+    /// own content must hide the window rather than record two copies of it.
+    /// </returns>
+    public static bool Exclude(IntPtr hwnd)
     {
-        if (hwnd == IntPtr.Zero) return;
+        if (hwnd == IntPtr.Zero) return false;
         try
         {
-            if (!NativeMethods.SetWindowDisplayAffinity(hwnd, NativeMethods.WDA_EXCLUDEFROMCAPTURE))
-            {
-                Log.Warn($"SetWindowDisplayAffinity failed (error {Marshal.GetLastWin32Error()}); " +
-                         "this window may appear in recordings.");
-            }
+            if (NativeMethods.SetWindowDisplayAffinity(hwnd, NativeMethods.WDA_EXCLUDEFROMCAPTURE))
+                return true;
+
+            Log.Warn($"SetWindowDisplayAffinity failed (error {Marshal.GetLastWin32Error()}); " +
+                     "this window may appear in recordings.");
+            return false;
         }
         catch (Exception ex)
         {
             Log.Warn(ex, "SetWindowDisplayAffinity threw.");
+            return false;
         }
     }
 

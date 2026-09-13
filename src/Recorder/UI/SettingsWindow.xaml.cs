@@ -3,6 +3,8 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using NAudio.CoreAudioApi;
 using Recorder.Capture;
@@ -54,6 +56,16 @@ public partial class SettingsWindow : Window
     private readonly AudioLevelPreview _systemPreview = new();
     private readonly DispatcherTimer _meterTimer;
 
+    /// <summary>
+    /// A camera opened only while this window is on screen, the visual counterpart to the level
+    /// meters. The app's own bubble is suspended for the duration, because the device is held with
+    /// exclusive control and choosing a camera is exactly when you need to see one.
+    /// </summary>
+    private readonly CameraCaptureService _cameraPreview = new();
+    private WriteableBitmap? _cameraBitmap;
+    private byte[] _cameraFrame = [];
+    private long _cameraShownFrames = -1;
+
     private HotkeyGesture? _startHotkey;
     private HotkeyGesture? _pauseHotkey;
     private HotkeyGesture? _stopHotkey;
@@ -103,6 +115,12 @@ public partial class SettingsWindow : Window
         MicDeviceCombo.SelectionChanged += (_, _) => RestartMicPreview();
         SystemDeviceCombo.SelectionChanged += (_, _) => RestartSystemPreview();
 
+        CameraBorderSlider.ValueChanged += (_, _) => CameraBorderText.Text = $"{CameraBorderSlider.Value:0} px";
+        CameraOpacitySlider.ValueChanged += (_, _) => CameraOpacityText.Text = $"{CameraOpacitySlider.Value:0%}";
+        CameraDeviceCombo.SelectionChanged += (_, _) => RestartCameraPreview();
+        CameraResolutionCombo.SelectionChanged += (_, _) => RestartCameraPreview();
+        CameraFpsCombo.SelectionChanged += (_, _) => RestartCameraPreview();
+
         // Selecting a named preset overwrites the advanced values, so the JSON always shows the
         // numbers actually in effect. Editing one of those values then means "Custom".
         NsOffRadio.Checked += (_, _) => OnPresetChosen(NoiseSuppressionPreset.Off);
@@ -144,6 +162,16 @@ public partial class SettingsWindow : Window
         PopulateDeviceCombo(MicDeviceCombo, DataFlow.Capture, "Default microphone (follow Windows)");
         PopulateDeviceCombo(SystemDeviceCombo, DataFlow.Render, "Default playback device (follow Windows)");
 
+        CameraResolutionCombo.Items.Add(new Choice<int>(480, "640 × 480"));
+        CameraResolutionCombo.Items.Add(new Choice<int>(720, "1280 × 720"));
+        CameraResolutionCombo.Items.Add(new Choice<int>(1080, "1920 × 1080"));
+
+        foreach (var fps in new[] { 15, 24, 30, 60 })
+            CameraFpsCombo.Items.Add(new Choice<int>(fps, $"{fps} FPS"));
+
+        CameraShapeCombo.Items.Add(new Choice<CameraShape>(CameraShape.Circle, "Circle"));
+        CameraShapeCombo.Items.Add(new Choice<CameraShape>(CameraShape.RoundedRect, "Rounded rectangle"));
+
         SampleRateCombo.Items.Add(new Choice<int>(44_100, "44.1 kHz"));
         SampleRateCombo.Items.Add(new Choice<int>(48_000, "48 kHz"));
 
@@ -181,6 +209,18 @@ public partial class SettingsWindow : Window
         SystemAudioCheck.IsChecked = s.RecordSystemAudio;
         MicrophoneCheck.IsChecked = s.RecordMicrophone;
         UpdateCustomHeightVisibility();
+
+        // Camera
+        CameraEnabledCheck.IsChecked = s.Camera.Enabled;
+        SelectChoice(CameraResolutionCombo, NearestCameraHeight(s.Camera.CaptureHeight));
+        SelectChoice(CameraFpsCombo, NearestCameraFps(s.Camera.Fps));
+        SelectChoice(CameraShapeCombo, CameraSettings.ParseShape(s.Camera.Shape));
+        CameraMirrorCheck.IsChecked = s.Camera.Mirror;
+        CameraBorderSlider.Value = s.Camera.BorderThickness;
+        CameraOpacitySlider.Value = s.Camera.Opacity;
+        CameraBorderColorBox.Text = s.Camera.BorderColor;
+        CameraBorderText.Text = $"{s.Camera.BorderThickness:0} px";
+        CameraOpacityText.Text = $"{s.Camera.Opacity:0%}";
 
         // Audio
         SelectDevice(MicDeviceCombo, s.Audio.MicrophoneDeviceId);
@@ -317,11 +357,14 @@ public partial class SettingsWindow : Window
             // Settings is normally unreachable during a recording; this is the belt to that braces.
             MicMeterHint.Text = "Level meter unavailable while recording.";
             SystemMeterHint.Text = "Level meter unavailable while recording.";
+            CameraPreviewText.Text = "Preview unavailable while recording.";
+            PopulateCamerasAsync();
             return;
         }
 
         RestartMicPreview();
         RestartSystemPreview();
+        PopulateCamerasAsync();
         _meterTimer.Start();
     }
 
@@ -345,13 +388,123 @@ public partial class SettingsWindow : Window
     {
         MicMeter.Value = _micPreview.ReadLevel();
         SystemMeter.Value = _systemPreview.ReadLevel();
+        UpdateCameraPreview();
     }
+
+    /// <summary>
+    /// Lists the cameras, then opens whichever one the draft points at.
+    /// </summary>
+    /// <remarks>
+    /// Enumeration is asynchronous and takes a moment, so the combo is filled after the window is
+    /// already up rather than blocking it. The selection is applied once the list exists, which is
+    /// why this — not <see cref="LoadFrom"/> — is what selects the device.
+    /// </remarks>
+    private async void PopulateCamerasAsync()
+    {
+        try
+        {
+            CameraDeviceCombo.Items.Clear();
+            CameraDeviceCombo.Items.Add(new DeviceChoice(null, "First available camera"));
+
+            var cameras = await CameraCaptureService.EnumerateAsync();
+            foreach (var camera in cameras)
+                CameraDeviceCombo.Items.Add(new DeviceChoice(camera.DeviceId, camera.FriendlyName));
+
+            _loading = true;
+            try { SelectDevice(CameraDeviceCombo, _draft.Camera.DeviceId); }
+            finally { _loading = false; }
+
+            if (cameras.Count == 0)
+            {
+                CameraStatusLabel.Text = "No camera was found on this machine.";
+                CameraPreviewText.Text = "No camera found.";
+                CameraDeviceCombo.IsEnabled = false;
+                CameraEnabledCheck.IsEnabled = false;
+                return;
+            }
+
+            CameraStatusLabel.Text = string.Empty;
+            RestartCameraPreview();
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(ex, "Listing cameras for the settings window failed.");
+            CameraStatusLabel.Text = "Cameras could not be listed.";
+        }
+    }
+
+    private async void RestartCameraPreview()
+    {
+        if (_loading) return;
+
+        if (_isRecording())
+        {
+            CameraPreviewText.Text = "Preview unavailable while recording.";
+            return;
+        }
+
+        _cameraPreview.Stop();
+        _cameraBitmap = null;
+        _cameraShownFrames = -1;
+        CameraPreviewImage.Source = null;
+        CameraPreviewText.Text = "Starting camera…";
+
+        var height = GetChoice(CameraResolutionCombo, 720);
+        var width = (int)Math.Round(height * 16.0 / 9.0) & ~1;
+
+        var started = await _cameraPreview.StartAsync(
+            (CameraDeviceCombo.SelectedItem as DeviceChoice)?.DeviceId,
+            width, height,
+            GetChoice(CameraFpsCombo, 30));
+
+        CameraPreviewText.Text = started
+            ? string.Empty
+            : _cameraPreview.Error ?? "The camera could not be opened.";
+    }
+
+    private void UpdateCameraPreview()
+    {
+        try
+        {
+            var width = _cameraPreview.Width;
+            var height = _cameraPreview.Height;
+            if (width <= 0 || height <= 0) return;
+
+            if (_cameraBitmap is null || _cameraBitmap.PixelWidth != width || _cameraBitmap.PixelHeight != height)
+            {
+                _cameraFrame = new byte[width * height * 4];
+                _cameraBitmap = new WriteableBitmap(width, height, 96, 96, PixelFormats.Bgra32, null);
+                CameraPreviewImage.Source = _cameraBitmap;
+                _cameraShownFrames = -1;
+            }
+
+            var frames = _cameraPreview.FramesCaptured;
+            if (frames == _cameraShownFrames) return;
+            if (!_cameraPreview.TryCopyLatestFrame(_cameraFrame)) return;
+
+            _cameraShownFrames = frames;
+            _cameraBitmap.WritePixels(new Int32Rect(0, 0, width, height), _cameraFrame, width * 4, 0);
+            CameraPreviewText.Text = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(ex, "Refreshing the settings camera preview failed.");
+        }
+    }
+
+    /// <summary>Snaps a stored capture height onto one of the offered choices.</summary>
+    private static int NearestCameraHeight(int height) =>
+        new[] { 480, 720, 1080 }.OrderBy(h => Math.Abs(h - height)).First();
+
+    private static int NearestCameraFps(int fps) =>
+        new[] { 15, 24, 30, 60 }.OrderBy(f => Math.Abs(f - fps)).First();
 
     private void StopPreviews()
     {
         _meterTimer.Stop();
         _micPreview.Dispose();
         _systemPreview.Dispose();
+        _cameraPreview.Dispose();
     }
 
     // ---------------------------------------------------------------- helpers
@@ -539,7 +692,7 @@ public partial class SettingsWindow : Window
         var folder = FolderBox.Text?.Trim();
         if (string.IsNullOrWhiteSpace(folder))
         {
-            ShowError("Choose a folder for recordings.", Tabs.Items[3]);
+            ShowError("Choose a folder for recordings.", OutputTab);
             return;
         }
 
@@ -548,19 +701,19 @@ public partial class SettingsWindow : Window
         if (!OutputFolder.TryPrepare(folder, out var reason))
         {
             ShowError($"That folder cannot be written to ({reason}). Recordings would be saved to " +
-                      $"{AppPaths.FallbackOutputFolder} instead.", Tabs.Items[3]);
+                      $"{AppPaths.FallbackOutputFolder} instead.", OutputTab);
             return;
         }
 
         if (!FilenameTemplate.IsUsable(TemplateBox.Text))
         {
-            ShowError("That filename pattern does not produce a usable name.", Tabs.Items[3]);
+            ShowError("That filename pattern does not produce a usable name.", OutputTab);
             return;
         }
 
         if (_startHotkey is null || _pauseHotkey is null || _stopHotkey is null)
         {
-            ShowError("Start, pause and stop each need a valid hotkey.", Tabs.Items[4]);
+            ShowError("Start, pause and stop each need a valid hotkey.", HotkeysTab);
             return;
         }
 
@@ -571,14 +724,14 @@ public partial class SettingsWindow : Window
 
         if (assigned.Distinct().Count() != assigned.Count)
         {
-            ShowError("Each action needs its own hotkey.", Tabs.Items[4]);
+            ShowError("Each action needs its own hotkey.", HotkeysTab);
             return;
         }
 
         var countdown = ParseInt(CountdownBox.Text, -1);
         if (countdown is < 0 or > 60)
         {
-            ShowError("Countdown must be between 0 and 60 seconds.", Tabs.Items[0]);
+            ShowError("Countdown must be between 0 and 60 seconds.", CaptureTab);
             return;
         }
 
@@ -586,14 +739,14 @@ public partial class SettingsWindow : Window
         var customHeight = ParseInt(CustomHeightBox.Text, -1);
         if (resolution == ResolutionPreset.Custom && customHeight is < 240 or > 4320)
         {
-            ShowError("Custom height must be between 240 and 4320 pixels.", Tabs.Items[0]);
+            ShowError("Custom height must be between 240 and 4320 pixels.", CaptureTab);
             return;
         }
 
         var maxBitrate = ParseInt(MaxBitrateBox.Text, -1);
         if (maxBitrate < 0 || (maxBitrate > 0 && maxBitrate < 500))
         {
-            ShowError("The bitrate ceiling must be 0 (automatic) or at least 500 kbps.", Tabs.Items[2]);
+            ShowError("The bitrate ceiling must be 0 (automatic) or at least 500 kbps.", VideoTab);
             return;
         }
 
@@ -620,6 +773,23 @@ public partial class SettingsWindow : Window
         s.RecordSystemAudio = SystemAudioCheck.IsChecked == true;
         s.RecordMicrophone = MicrophoneCheck.IsChecked == true;
         s.OutputFolder = folder;
+
+        // Camera
+        s.Camera.Enabled = CameraEnabledCheck.IsChecked == true;
+        s.Camera.DeviceId = (CameraDeviceCombo.SelectedItem as DeviceChoice)?.DeviceId;
+
+        var cameraHeight = GetChoice(CameraResolutionCombo, 720);
+        s.Camera.CaptureHeight = cameraHeight;
+        s.Camera.CaptureWidth = (int)Math.Round(cameraHeight * 16.0 / 9.0) & ~1;
+
+        s.Camera.Fps = GetChoice(CameraFpsCombo, 30);
+        s.Camera.Shape = CameraSettings.FormatShape(GetChoice(CameraShapeCombo, CameraShape.Circle));
+        s.Camera.Mirror = CameraMirrorCheck.IsChecked == true;
+        s.Camera.BorderThickness = CameraBorderSlider.Value;
+        s.Camera.Opacity = CameraOpacitySlider.Value;
+        s.Camera.BorderColor = string.IsNullOrWhiteSpace(CameraBorderColorBox.Text)
+            ? "#FFFFFFFF"
+            : CameraBorderColorBox.Text.Trim();
 
         // Audio
         s.Audio.MicrophoneDeviceId = (MicDeviceCombo.SelectedItem as DeviceChoice)?.DeviceId;
@@ -698,6 +868,15 @@ public partial class SettingsWindow : Window
     }
 
     /// <summary>Reports a problem and, where known, switches to the tab it is on.</summary>
+    /// <summary>
+    /// Shows a validation message and brings the offending tab forward.
+    /// </summary>
+    /// <remarks>
+    /// Tabs are addressed by name rather than by index on purpose: this used to index into
+    /// <c>Tabs.Items</c>, which meant inserting a tab anywhere but the end silently pointed every
+    /// message at the wrong one — a failure with no compiler error and no visible symptom until
+    /// someone typed an invalid value.
+    /// </remarks>
     private void ShowError(string message, object? tab = null)
     {
         ErrorText.Text = message;

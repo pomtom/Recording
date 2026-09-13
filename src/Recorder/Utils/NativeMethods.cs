@@ -107,6 +107,55 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
 
+    public const uint MONITOR_DEFAULTTONEAREST = 0x00000002;
+
+    /// <summary>
+    /// A window's bounds in physical pixels, in the same virtual-screen space as
+    /// <see cref="MONITORINFOEX.rcMonitor"/>.
+    /// </summary>
+    /// <remarks>
+    /// The process is PerMonitorV2, so this is the honest answer and needs no DPI arithmetic — which
+    /// is the point. WPF's <c>Window.Left</c>/<c>Top</c> are device-independent units in a global
+    /// space whose relationship to physical pixels is per-monitor affine, so converting them with a
+    /// single scale factor is only correct when every monitor shares one DPI. Asking Win32 for the
+    /// rectangle skips the whole problem.
+    /// </remarks>
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+
+    public const uint SWP_NOZORDER = 0x0004;
+    public const uint SWP_NOACTIVATE = 0x0010;
+
+    /// <summary>
+    /// Moves and resizes a window in physical pixels.
+    /// </summary>
+    /// <remarks>
+    /// The counterpart to <see cref="GetWindowRect"/>, and used for the same reason: a window whose
+    /// position is what gets baked into a video has to be placed in the same coordinate space it is
+    /// later measured in. Setting WPF's <c>Left</c>/<c>Width</c> instead would put a DPI conversion
+    /// on one side of that round trip and not the other.
+    /// </remarks>
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetWindowPos(
+        IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+
+    /// <summary>The work area (screen minus taskbar) of the monitor a window is on, in physical pixels.</summary>
+    public static bool TryGetWorkArea(IntPtr hwnd, out RECT workArea)
+    {
+        workArea = default;
+
+        var monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        if (monitor == IntPtr.Zero) return false;
+
+        var info = new MONITORINFOEX { cbSize = Marshal.SizeOf<MONITORINFOEX>() };
+        if (!GetMonitorInfo(monitor, ref info)) return false;
+
+        workArea = info.rcWork;
+        return true;
+    }
+
     // ---- Per-monitor DPI ----
 
     public enum MonitorDpiType

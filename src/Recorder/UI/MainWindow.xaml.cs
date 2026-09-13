@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private readonly SettingsManager _settings;
     private readonly Func<Task> _exitRequested;
     private readonly Action _settingsRequested;
+    private readonly CameraController? _cameras;
     private readonly DispatcherTimer _elapsedTimer;
 
     /// <summary>Set by the app when it is really shutting down, so Close is allowed through.</summary>
@@ -35,12 +36,14 @@ public partial class MainWindow : Window
         RecordingManager manager,
         SettingsManager settings,
         Action settingsRequested,
-        Func<Task> exitRequested)
+        Func<Task> exitRequested,
+        CameraController? cameras = null)
     {
         _manager = manager;
         _settings = settings;
         _settingsRequested = settingsRequested;
         _exitRequested = exitRequested;
+        _cameras = cameras;
 
         InitializeComponent();
 
@@ -55,6 +58,14 @@ public partial class MainWindow : Window
         // ApplyMuteState. The button's own IsChecked is never the source of truth.
         MuteMicButton.Click += (_, _) => _manager.SetMuted(AudioSourceKind.Microphone, MuteMicButton.IsChecked == true);
         MuteSystemButton.Click += (_, _) => _manager.SetMuted(AudioSourceKind.SystemAudio, MuteSystemButton.IsChecked == true);
+
+        // Same contract as the mute tiles: the click reports intent, the controller owns the state
+        // and reports it back through ApplyCameraState.
+        CameraButton.Click += async (_, _) =>
+        {
+            if (_cameras is null) return;
+            await _cameras.SetEnabledAsync(CameraButton.IsChecked == true);
+        };
 
         _elapsedTimer = new DispatcherTimer(DispatcherPriority.Normal)
         {
@@ -187,6 +198,8 @@ public partial class MainWindow : Window
     /// </remarks>
     public void ApplyMuteState()
     {
+        ApplyCameraState();
+
         var settings = _settings.Current;
         var live = _manager.State is RecorderState.Recording or RecorderState.Paused;
 
@@ -209,6 +222,45 @@ public partial class MainWindow : Window
             liveGlyph: "🔊",
             mutedGlyph: "🔇",
             disabledReason: settings.RecordSystemAudio ? "Only while recording" : "Off in Settings");
+    }
+
+    /// <summary>Called by the app whenever the camera is switched on or off, or fails.</summary>
+    public void ApplyCameraState()
+    {
+        if (_cameras is null)
+        {
+            CameraButton.IsEnabled = false;
+            CameraButton.IsChecked = false;
+            CameraStatusText.Text = "Unavailable";
+            return;
+        }
+
+        var on = _cameras.IsEnabled;
+
+        CameraButton.IsEnabled = _cameras.IsAvailable;
+        CameraButton.IsChecked = on;
+        CameraGlyph.Text = on ? "📷" : "🚫";
+
+        if (!_cameras.IsAvailable)
+        {
+            CameraStatusText.Text = "No camera found";
+            CameraButton.ToolTip = _cameras.Status ?? "No camera was found on this machine.";
+            return;
+        }
+
+        // A camera that was asked for but could not open has to say so on the tile itself. The
+        // alternative is a control that reads "on" next to a bubble showing nothing.
+        if (on && _cameras.Status is not null)
+        {
+            CameraStatusText.Text = "Unavailable";
+            CameraButton.ToolTip = _cameras.Status;
+            return;
+        }
+
+        CameraStatusText.Text = on ? "On" : "Off";
+        CameraButton.ToolTip = on
+            ? "The camera bubble is recorded into the video. Drag or resize it on screen."
+            : "Show a camera bubble and record it into the video.";
     }
 
     private static void ApplyMuteToggle(

@@ -1,0 +1,165 @@
+<Window x:Class="Recorder.Overlay.CameraBubbleWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:p="clr-namespace:System.Windows.Controls.Primitives;assembly=PresentationFramework"
+        Title="Camera"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        WindowStartupLocation="Manual"
+        SizeToContent="Manual"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        Focusable="False"
+        Width="260"
+        Height="260">
+
+    <!-- No drop shadow, no margin, no padding anywhere. The window rectangle IS the bubble
+         rectangle: GetWindowRect is what decides where the camera lands in the recording, so any
+         chrome outside the visual would shift the baked copy away from what is on screen. -->
+
+    <Window.Resources>
+        <Style TargetType="p:Thumb" x:Key="Grip">
+            <Setter Property="Width" Value="26" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Cursor" Value="SizeNWSE" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="p:Thumb">
+                        <Grid Background="Transparent">
+                            <Ellipse Fill="#CC1B1C1F" Stroke="#80FFFFFF" StrokeThickness="1" />
+                            <Path Stroke="#F2F2F2"
+                                  StrokeThickness="1.6"
+                                  StrokeStartLineCap="Round"
+                                  StrokeEndLineCap="Round"
+                                  Data="M 8,16 L 16,8 M 12,17 L 17,12"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center" />
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="Button" x:Key="Chip">
+            <Setter Property="Width" Value="24" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="#F2F2F2" />
+            <Setter Property="FontFamily" Value="Segoe UI" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Ellipse x:Name="Bd" Fill="#CC1B1C1F" Stroke="#80FFFFFF" StrokeThickness="1" />
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Fill" Value="#E6B33A3A" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid x:Name="Root" Background="Transparent" Cursor="SizeAll">
+
+        <!-- Clipped to the bubble outline in code; the clip has to follow both the size and the
+             chosen shape, neither of which XAML can express as a static geometry. -->
+        <Grid x:Name="Clipped">
+            <Rectangle x:Name="Backdrop" Fill="#16171A" />
+
+            <!-- UniformToFill is the same centre-crop rule CameraBubbleGeometry.ComputeCoverCrop
+                 applies when baking, which is what keeps the preview and the recording identical. -->
+            <Image x:Name="Preview"
+                   Stretch="UniformToFill"
+                   RenderTransformOrigin="0.5,0.5" />
+
+            <TextBlock x:Name="StatusText"
+                       Foreground="#9AA0A6"
+                       FontFamily="Segoe UI"
+                       FontSize="12"
+                       TextAlignment="Center"
+                       TextWrapping="Wrap"
+                       Margin="18"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Text="Starting camera…" />
+        </Grid>
+
+        <Path x:Name="Ring" IsHitTestVisible="False" />
+
+        <!-- Chrome lives inside the bubble and only appears on hover, so the preview reads as the
+             recording does. It is cosmetic either way: the window is excluded from capture. -->
+        <Grid x:Name="Chrome" Opacity="0">
+            <Grid.Style>
+                <Style TargetType="Grid">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsMouseOver, ElementName=Root}" Value="True">
+                            <DataTrigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.12" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </DataTrigger.EnterActions>
+                            <DataTrigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.25" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </DataTrigger.ExitActions>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Grid.Style>
+
+            <Button x:Name="HideButton"
+                    Style="{StaticResource Chip}"
+                    Content="✕"
+                    ToolTip="Turn the camera off"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Top"
+                    Margin="0,6,6,0" />
+
+            <p:Thumb x:Name="ResizeGrip"
+                     Style="{StaticResource Grip}"
+                     HorizontalAlignment="Right"
+                     VerticalAlignment="Bottom"
+                     Margin="0,0,2,2" />
+        </Grid>
+
+        <Grid.ContextMenu>
+            <ContextMenu x:Name="Menu">
+                <MenuItem x:Name="ShapeCircleItem" Header="Circle" IsCheckable="True" />
+                <MenuItem x:Name="ShapeRectItem" Header="Rounded rectangle" IsCheckable="True" />
+                <Separator />
+                <MenuItem x:Name="MirrorItem" Header="Mirror" IsCheckable="True" />
+                <Separator />
+                <MenuItem Header="Size">
+                    <MenuItem x:Name="SizeSmallItem" Header="Small" />
+                    <MenuItem x:Name="SizeMediumItem" Header="Medium" />
+                    <MenuItem x:Name="SizeLargeItem" Header="Large" />
+                </MenuItem>
+                <MenuItem Header="Snap to corner">
+                    <MenuItem x:Name="SnapTopLeftItem" Header="Top left" />
+                    <MenuItem x:Name="SnapTopRightItem" Header="Top right" />
+                    <MenuItem x:Name="SnapBottomLeftItem" Header="Bottom left" />
+                    <MenuItem x:Name="SnapBottomRightItem" Header="Bottom right" />
+                </MenuItem>
+                <Separator />
+                <MenuItem x:Name="HideItem" Header="Turn the camera off" />
+            </ContextMenu>
+        </Grid.ContextMenu>
+    </Grid>
+</Window>

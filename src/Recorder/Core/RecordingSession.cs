@@ -119,6 +119,11 @@ public sealed class RecordingSession : IAsyncDisposable
 
         _frameBuffer = new byte[spec.FrameBytes];
 
+        _request.Overlay?.Begin(new OverlayTarget(
+            _capture.OutputWidth, _capture.OutputHeight,
+            _capture.SourceWidth, _capture.SourceHeight,
+            _capture.PixelFormat, _request.Monitor));
+
         _encoder = await FFmpegEncoder.StartAsync(
             _request.FFmpegPath, spec, _request.Encoder, cancellationToken).ConfigureAwait(false);
 
@@ -267,6 +272,12 @@ public sealed class RecordingSession : IAsyncDisposable
         // buffer as-is. It is zeroed, which reads as one black frame rather than a stall.
         _capture!.TryCopyLatestFrame(_frameBuffer);
 
+        // Drawn here rather than where capture frames arrive on purpose. WGC only delivers a frame
+        // when the screen changes, so compositing there would freeze the camera the instant the
+        // screen went still — someone talking over a motionless slide would record a photograph of
+        // themselves. The pacer runs at exactly the output rate, so there is no such path.
+        _request.Overlay?.Compose(_frameBuffer);
+
         if (!_encoder!.WriteVideoFrame(_frameBuffer))
         {
             RaiseFailure("The recording stopped because the encoder closed unexpectedly.");
@@ -414,6 +425,10 @@ public sealed class RecordingSession : IAsyncDisposable
 
         try { _cts.Cancel(); } catch { }
         JoinPacer();
+
+        // After the pacer has stopped, so the overlay is never released out from under a frame
+        // being composed. Both the clean and the aborted paths land here.
+        try { _request.Overlay?.End(); } catch (Exception ex) { Log.Warn(ex, "Releasing the frame overlay failed."); }
 
         if (_capture is not null)
         {

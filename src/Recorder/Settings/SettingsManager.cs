@@ -41,7 +41,7 @@ public sealed class SettingsManager
     public string SettingsPath => AppPaths.SettingsPath;
 
     /// <summary>The version <see cref="AppSettings"/> is written at. Bumped when the shape changes.</summary>
-    private const int CurrentVersion = 2;
+    private const int CurrentVersion = 3;
 
     public void Load()
     {
@@ -160,6 +160,7 @@ public sealed class SettingsManager
         ValidateVideo(s);
         ValidateNaming(s);
         ValidateOverlay(s);
+        ValidateCamera(s);
         ValidateBehavior(s);
         ValidateLogging(s);
     }
@@ -261,6 +262,56 @@ public sealed class SettingsManager
 
         o.Opacity = ClampDouble(o.Opacity, 0.2, 1.0, 0.95);
         o.Scale = ClampDouble(o.Scale, 0.75, 2.0, 1.0);
+    }
+
+    private static void ValidateCamera(AppSettings s)
+    {
+        var c = s.Camera ??= new CameraSettings();
+
+        if (string.IsNullOrWhiteSpace(c.DeviceId)) c.DeviceId = null;
+
+        c.Shape = CameraSettings.FormatShape(CameraSettings.ParseShape(c.Shape));
+
+        // Even dimensions only: the composite ends up in a 4:2:0 frame like everything else, and an
+        // odd-sized source would round differently on the two chroma planes.
+        c.CaptureWidth = Math.Clamp(c.CaptureWidth, 160, 4096) & ~1;
+        c.CaptureHeight = Math.Clamp(c.CaptureHeight, 120, 2160) & ~1;
+
+        // The camera rate is also the rate at which a still screen gets re-composited, so the
+        // ceiling is about cost, not about what webcams can do.
+        c.Fps = Math.Clamp(c.Fps, 5, 60);
+
+        // The upper bound is a cost ceiling as much as a taste one: the blend is proportional to
+        // the bubble's area, and the window is layered (AllowsTransparency), which WPF renders in
+        // software.
+        c.Size = ClampDouble(c.Size, 120, 900, 260);
+        c.BorderThickness = ClampDouble(c.BorderThickness, 0, 16, 4);
+        c.Opacity = ClampDouble(c.Opacity, 0.2, 1.0, 1.0);
+        c.SnapDistance = ClampDouble(c.SnapDistance, 0, 600, 160);
+        c.SnapMargin = ClampDouble(c.SnapMargin, 0, 300, 32);
+
+        if (!IsParsableColor(c.BorderColor)) c.BorderColor = "#FFFFFFFF";
+
+        // A saved position is only meaningful as a pair; half of one would place the bubble at zero
+        // on the other axis, which is not where the user left it.
+        if (c.Left is null || c.Top is null || !double.IsFinite(c.Left.Value) || !double.IsFinite(c.Top.Value))
+        {
+            c.Left = null;
+            c.Top = null;
+        }
+    }
+
+    /// <summary>Whether a colour string is one WPF can parse, without throwing to find out.</summary>
+    private static bool IsParsableColor(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        try
+        {
+            System.Windows.Media.ColorConverter.ConvertFromString(value);
+            return true;
+        }
+        catch (FormatException) { return false; }
+        catch (NotSupportedException) { return false; }
     }
 
     private static void ValidateBehavior(AppSettings s)

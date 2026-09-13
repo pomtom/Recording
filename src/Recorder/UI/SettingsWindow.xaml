@@ -180,7 +180,7 @@
         <TabControl x:Name="Tabs">
 
             <!-- ==================================================== Capture -->
-            <TabItem Header="Capture">
+            <TabItem x:Name="CaptureTab" Header="Capture">
                 <StackPanel Margin="2,16,2,0">
                     <TextBlock Text="Monitor" Style="{StaticResource FieldLabel}" />
                     <ComboBox x:Name="MonitorCombo" Margin="0,0,0,12" />
@@ -224,8 +224,105 @@
                 </StackPanel>
             </TabItem>
 
+            <!-- ===================================================== Camera -->
+            <TabItem x:Name="CameraTab" Header="Camera">
+                <StackPanel Margin="2,16,2,0">
+
+                    <CheckBox x:Name="CameraEnabledCheck" Content="Show a camera bubble" Margin="0,0,0,4" />
+                    <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,12"
+                               Text="The bubble is recorded into the video exactly where you put it on screen. Drag it to move, drag the corner to resize, or right-click it for shape and size." />
+
+                    <TextBlock Text="Camera" Style="{StaticResource FieldLabel}" />
+                    <ComboBox x:Name="CameraDeviceCombo" Margin="0,0,0,4" />
+                    <TextBlock x:Name="CameraStatusLabel" Style="{StaticResource Hint}" Margin="0,0,0,12" />
+
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Capture size" Style="{StaticResource FieldLabel}" />
+                            <ComboBox x:Name="CameraResolutionCombo" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Frame rate" Style="{StaticResource FieldLabel}" />
+                            <ComboBox x:Name="CameraFpsCombo" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="4">
+                            <TextBlock Text="Shape" Style="{StaticResource FieldLabel}" />
+                            <ComboBox x:Name="CameraShapeCombo" />
+                        </StackPanel>
+                    </Grid>
+
+                    <CheckBox x:Name="CameraMirrorCheck" Content="Mirror the camera" Margin="0,0,0,4" />
+                    <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,12"
+                               Text="Applies to the bubble and the recording together, so what you arrange is what you get." />
+
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Border thickness" Style="{StaticResource FieldLabel}" />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Slider x:Name="CameraBorderSlider" Minimum="0" Maximum="16"
+                                        TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" />
+                                <TextBlock x:Name="CameraBorderText" Grid.Column="1" MinWidth="44"
+                                           Margin="8,0,0,0" VerticalAlignment="Center"
+                                           Foreground="#C9CDD2" FontFamily="Consolas, Segoe UI" />
+                            </Grid>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Opacity" Style="{StaticResource FieldLabel}" />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Slider x:Name="CameraOpacitySlider" Minimum="0.2" Maximum="1.0"
+                                        VerticalAlignment="Center" />
+                                <TextBlock x:Name="CameraOpacityText" Grid.Column="1" MinWidth="44"
+                                           Margin="8,0,0,0" VerticalAlignment="Center"
+                                           Foreground="#C9CDD2" FontFamily="Consolas, Segoe UI" />
+                            </Grid>
+                        </StackPanel>
+                    </Grid>
+
+                    <TextBlock Text="Border colour" Style="{StaticResource FieldLabel}" />
+                    <TextBox x:Name="CameraBorderColorBox" Margin="0,0,0,4" />
+                    <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,12"
+                               Text="A colour name, #RRGGBB, or #AARRGGBB for a translucent ring." />
+
+                    <TextBlock Text="Preview" Style="{StaticResource FieldLabel}" />
+                    <Border Background="#16171A" CornerRadius="6" Height="150" Margin="0,0,0,4">
+                        <Grid>
+                            <Image x:Name="CameraPreviewImage" Stretch="Uniform" Margin="6" />
+                            <TextBlock x:Name="CameraPreviewText"
+                                       Foreground="#9AA0A6" FontFamily="Segoe UI" FontSize="12"
+                                       TextAlignment="Center" TextWrapping="Wrap" Margin="16"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Grid>
+                    </Border>
+                </StackPanel>
+            </TabItem>
+
             <!-- ====================================================== Audio -->
-            <TabItem Header="Audio">
+            <TabItem x:Name="AudioTab" Header="Audio">
                 <StackPanel Margin="2,16,2,0">
 
                     <TextBlock Text="Microphone" Style="{StaticResource SectionHeader}" />
@@ -371,7 +468,7 @@
             </TabItem>
 
             <!-- ====================================================== Video -->
-            <TabItem Header="Video">
+            <TabItem x:Name="VideoTab" Header="Video">
                 <StackPanel Margin="2,16,2,0">
                     <TextBlock Text="Quality" Style="{StaticResource SectionHeader}" />
 
@@ -412,7 +509,7 @@
             </TabItem>
 
             <!-- ===================================================== Output -->
-            <TabItem Header="Output">
+            <TabItem x:Name="OutputTab" Header="Output">
                 <StackPanel Margin="2,16,2,0">
                     <TextBlock Text="Save location" Style="{StaticResource SectionHeader}" />
                     <Grid>
@@ -439,7 +536,7 @@
             </TabItem>
 
             <!-- ==================================================== Hotkeys -->
-            <TabItem Header="Hotkeys">
+            <TabItem x:Name="HotkeysTab" Header="Hotkeys">
                 <StackPanel Margin="2,16,2,0">
                     <Grid Margin="0,0,0,12">
                         <Grid.ColumnDefinitions>
@@ -496,7 +593,7 @@
             </TabItem>
 
             <!-- ==================================================== General -->
-            <TabItem Header="General">
+            <TabItem x:Name="GeneralTab" Header="General">
                 <StackPanel Margin="2,16,2,0">
                     <TextBlock Text="Startup and window" Style="{StaticResource SectionHeader}" />
                     <CheckBox x:Name="StartWithWindowsCheck" Content="Start Pomtom Recorder with Windows" />

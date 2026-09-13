@@ -35,6 +35,7 @@ public sealed class RecordingManager : IAsyncDisposable
     private readonly FFmpegProvisioner _provisioner;
     private readonly EncoderProbe _encoderProbe;
     private readonly Mp4Finalizer _finalizer;
+    private readonly CameraController? _cameras;
 
     private readonly SemaphoreSlim _commandLock = new(1, 1);
 
@@ -43,16 +44,23 @@ public sealed class RecordingManager : IAsyncDisposable
     private RecorderState _state = RecorderState.Idle;
     private bool _disposed;
 
+    /// <param name="cameras">
+    /// The camera bubble, or null when there is none. Optional because a recording is complete
+    /// without one — every camera failure has to leave the screen recording running, and the
+    /// simplest expression of that is a manager that never required a camera in the first place.
+    /// </param>
     public RecordingManager(
         SettingsManager settings,
         FFmpegProvisioner provisioner,
         EncoderProbe encoderProbe,
-        Mp4Finalizer finalizer)
+        Mp4Finalizer finalizer,
+        CameraController? cameras = null)
     {
         _settings = settings;
         _provisioner = provisioner;
         _encoderProbe = encoderProbe;
         _finalizer = finalizer;
+        _cameras = cameras;
     }
 
     public RecorderState State => _state;
@@ -187,6 +195,10 @@ public sealed class RecordingManager : IAsyncDisposable
         var encoder = _encoderProbe.Resolve(ParseEncoderOverride(settings.Video.EncoderOverride), out var encoderWarning);
         if (encoderWarning is not null) RaiseError(encoderWarning);
 
+        // A bubble parked on another display would simply not appear in the recording, which looks
+        // identical to the feature being broken. Move it before the geometry is sampled.
+        _cameras?.EnsureOnMonitor(monitor);
+
         var request = new RecordingRequest
         {
             Monitor = monitor,
@@ -204,6 +216,7 @@ public sealed class RecordingManager : IAsyncDisposable
             PartPath = partPath,
             FFmpegPath = _provisioner.GetFFmpegPath(),
             Encoder = encoder,
+            Overlay = _cameras?.Overlay,
         };
 
         SetState(RecorderState.CountingDown);

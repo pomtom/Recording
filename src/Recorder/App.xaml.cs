@@ -42,6 +42,7 @@ public partial class App : Application
     private GlobalHotkeyManager _hotkeys = null!;
     private TrayManager _tray = null!;
     private PowerEventMonitor _power = null!;
+    private CameraController _cameras = null!;
     private MainWindow? _mainWindow;
     private RecordingOverlayWindow? _overlay;
 
@@ -72,6 +73,11 @@ public partial class App : Application
             // Provisioning ffmpeg and probing encoders touches ~100 MB of I/O on the very first
             // run. Doing it off the UI thread keeps startup inside the 2-second budget.
             _ = Task.Run(WarmUpAsync);
+
+            // Enumerating cameras and opening one takes a few hundred milliseconds, but it has to
+            // stay on the UI thread because it may put the bubble window on screen. Left unawaited
+            // so it runs after startup returns rather than inside the budget.
+            _ = Dispatcher.InvokeAsync(async () => await _cameras.InitializeAsync());
         }
         catch (Exception ex)
         {
@@ -110,7 +116,11 @@ public partial class App : Application
         _encoderProbe = new EncoderProbe(_provisioner);
         _finalizer = new Mp4Finalizer(_provisioner);
 
-        _manager = new RecordingManager(_settings, _provisioner, _encoderProbe, _finalizer);
+        // Built before the manager because every recording is handed the camera overlay, and
+        // app-lifetime because the bubble is live while the app is idle.
+        _cameras = new CameraController(_settings);
+
+        _manager = new RecordingManager(_settings, _provisioner, _encoderProbe, _finalizer, _cameras);
         _manager.StateChanged += OnStateChanged;
         _manager.Completed += OnRecordingCompleted;
         _manager.ErrorOccurred += OnRecordingError;
@@ -128,6 +138,7 @@ public partial class App : Application
             StartupRegistration.Apply(updated.Behavior.StartWithWindows);
             _mainWindow?.RefreshSettingsText();
             _mainWindow?.ApplyState(_manager.State);
+            _ = _cameras.ApplySettingsAsync(updated);
         });
 
         _power = new PowerEventMonitor(
@@ -182,7 +193,8 @@ public partial class App : Application
             _manager,
             _settings,
             settingsRequested: ShowSettingsWindow,
-            exitRequested: ExitAsync);
+            exitRequested: ExitAsync,
+            cameras: _cameras);
 
         // Both surfaces track mute from the manager, so they cannot drift apart.
         _manager.MuteChanged += (_, _) => OnUi(() =>
@@ -191,6 +203,11 @@ public partial class App : Application
             _tray?.ApplyMuteState(_manager.IsMicrophoneMuted, _manager.IsSystemAudioMuted);
             _overlay?.SetMuted(_manager.IsMicrophoneMuted && _settings.Current.Overlay.ShowMuteState);
         });
+
+        // The camera has exactly the mute controls' problem — the main window, the bubble's close
+        // button and its context menu can all change it — and exactly the mute controls' answer.
+        _cameras.Changed += (_, _) => OnUi(() => _mainWindow?.ApplyCameraState());
+        _mainWindow.ApplyCameraState();
 
         if (!_settings.Current.Behavior.StartMinimized) _mainWindow.Show();
     }
@@ -299,6 +316,8 @@ public partial class App : Application
         _tray?.ApplyState(e.State);
         _mainWindow?.ApplyState(e.State);
 
+        _cameras?.SetRecording(e.State.IsActive());
+
         if (e.State.IsActive() || e.State == RecorderState.Finalizing) ShowOverlay(e.State);
         else HideOverlay();
     });
@@ -337,7 +356,13 @@ public partial class App : Application
         {
             var window = new SettingsWindow(_settings, () => _manager.State.IsActive());
             if (_mainWindow is not null && _mainWindow.IsVisible) window.Owner = _mainWindow;
-            window.ShowDialog();
+
+            // The camera is opened with exclusive control, so the settings preview and the bubble
+            // cannot both hold it. Choosing a camera is exactly when you need to see one, so the
+            // settings window wins for as long as it is open.
+            _cameras.Suspend();
+            try { window.ShowDialog(); }
+            finally { _ = _cameras.ResumeAsync(); }
         }
         catch (Exception ex)
         {
@@ -486,6 +511,7 @@ public partial class App : Application
         {
             try { _power?.Dispose(); } catch { }
             try { _hotkeys?.Dispose(); } catch { }
+            try { _cameras?.Dispose(); } catch { }
             HideOverlay();
             try { _tray?.Dispose(); } catch { }
 

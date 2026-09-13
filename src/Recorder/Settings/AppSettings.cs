@@ -28,8 +28,23 @@ public enum ResolutionPreset
 /// </remarks>
 public sealed class AppSettings
 {
-    /// <summary>Bumped when a change needs real migration logic. Nothing reads it yet.</summary>
-    public int SettingsVersion { get; set; } = 2;
+    /// <summary>
+    /// Bumped when a section is added, so an existing file is rewritten to mention it.
+    /// </summary>
+    /// <remarks>
+    /// <para>A missing section deserialises to its defaults and the app runs perfectly well without
+    /// the rewrite — but a configuration file meant to be hand-edited that does not mention a
+    /// setting is one nobody can discover that setting in. <see cref="SettingsManager.Load"/> uses
+    /// this to decide when to write the file back out; existing values are read first and preserved.
+    /// Version 3 added the <see cref="Camera"/> section.</para>
+    ///
+    /// <para>The default is deliberately <b>0</b>, not the current version. A key absent from the
+    /// JSON leaves the property at its C# default, so any other value would make the very oldest
+    /// files — the ones written before this key existed, which are precisely the ones most in need
+    /// of a rewrite — indistinguishable from current ones. <see cref="SettingsManager.Validate"/>
+    /// stamps the real version on afterwards.</para>
+    /// </remarks>
+    public int SettingsVersion { get; set; }
 
     public string OutputFolder { get; set; } = @"D:\Recordings";
 
@@ -98,6 +113,8 @@ public sealed class AppSettings
 
     public OverlaySettings Overlay { get; set; } = new();
 
+    public CameraSettings Camera { get; set; } = new();
+
     public BehaviorSettings Behavior { get; set; } = new();
 
     public LoggingSettings Logging { get; set; } = new();
@@ -162,6 +179,7 @@ public sealed class AppSettings
         copy.Video = Video.Clone();
         copy.Naming = Naming.Clone();
         copy.Overlay = Overlay.Clone();
+        copy.Camera = Camera.Clone();
         copy.Behavior = Behavior.Clone();
         copy.Logging = Logging.Clone();
         return copy;

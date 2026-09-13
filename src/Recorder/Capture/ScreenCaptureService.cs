@@ -49,6 +49,17 @@ public sealed class ScreenCaptureService : IDisposable
     /// <summary>Raised when the captured monitor disappears (unplugged, or the session was closed).</summary>
     public event EventHandler? CaptureLost;
 
+    /// <summary>
+    /// The monitor's own pixel dimensions, before any downscale.
+    /// </summary>
+    /// <remarks>
+    /// Overlays position themselves against what is on screen, so they need the ratio between these
+    /// and <see cref="OutputWidth"/> to land in the right place in a downscaled recording.
+    /// </remarks>
+    public int SourceWidth => _converter?.SourceWidth ?? 0;
+
+    public int SourceHeight => _converter?.SourceHeight ?? 0;
+
     public int OutputWidth => _converter?.OutputWidth ?? 0;
     public int OutputHeight => _converter?.OutputHeight ?? 0;
     public int TargetWidth => _converter?.TargetWidth ?? 0;

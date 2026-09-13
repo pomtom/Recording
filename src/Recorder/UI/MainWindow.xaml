@@ -61,7 +61,7 @@
         <!-- A mute control has to answer "is it on?" at a glance, so muted is a distinct colour and
              a distinct sublabel rather than only a caption swap. IsChecked carries the state; the
              window never stores it separately. -->
-        <Style TargetType="ToggleButton" x:Key="MuteToggle">
+        <Style TargetType="ToggleButton" x:Key="MuteToggleBase">
             <Setter Property="Height" Value="48" />
             <Setter Property="Foreground" Value="#F2F2F2" />
             <Setter Property="Background" Value="#2B2D31" />
@@ -70,6 +70,43 @@
             <Setter Property="FontFamily" Value="Segoe UI" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        </Style>
+
+        <!-- Same tile as the mute toggles but the opposite polarity: checked means the camera is
+             ON, so checked has to read as active rather than as a warning. Sharing one style with
+             two meanings would make the colour ambiguous, which is the one thing these tiles exist
+             to avoid. -->
+        <Style TargetType="ToggleButton" x:Key="CameraToggle" BasedOn="{StaticResource MuteToggleBase}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd"
+                                CornerRadius="6"
+                                Padding="10,6"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}">
+                            <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#1E3A2C" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#3B7A5A" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.85" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.4" />
+                                <Setter Property="Cursor" Value="Arrow" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ToggleButton" x:Key="MuteToggle" BasedOn="{StaticResource MuteToggleBase}">
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ToggleButton">
@@ -179,6 +216,19 @@
                 </StackPanel>
             </ToggleButton>
         </Grid>
+
+        <!-- Camera (meaningful whether or not a recording is running) -->
+        <ToggleButton x:Name="CameraButton" Style="{StaticResource CameraToggle}" Margin="0,0,0,10">
+            <StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock x:Name="CameraGlyph" Text="📷" FontSize="13" VerticalAlignment="Center" />
+                    <TextBlock Text="Camera" Margin="6,0,0,0" FontSize="12"
+                               Foreground="#F2F2F2" VerticalAlignment="Center" />
+                </StackPanel>
+                <TextBlock x:Name="CameraStatusText" Style="{StaticResource Caption}"
+                           Margin="0,2,0,0" Text="Off" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+        </ToggleButton>
 
         <Grid>
             <Grid.ColumnDefinitions>

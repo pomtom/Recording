@@ -45,4 +45,14 @@ public sealed record RecordingRequest
 
     /// <summary>The encoder <see cref="EncoderProbe"/> validated on this machine.</summary>
     public required VideoEncoder Encoder { get; init; }
+
+    /// <summary>
+    /// Something to stamp onto every encoded frame — the camera bubble, when one is enabled.
+    /// </summary>
+    /// <remarks>
+    /// Not required, and deliberately an interface rather than the camera itself: the session's job
+    /// is to hand each converted frame to whatever wants to draw on it, not to know what a webcam
+    /// is. A null overlay is the ordinary case and costs a null check per frame.
+    /// </remarks>
+    public IVideoFrameOverlay? Overlay { get; init; }
 }
