@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The platform-neutral half of Pomtom Recorder: recording clock and pacer, audio mixer and DSP,
+       camera compositing maths, ffmpeg orchestration, settings, crash recovery and logging.
+
+       Nothing in here may reference an operating system. Every OS-specific capability arrives
+       through an interface in Platform/, implemented separately by the Windows app (src/Recorder)
+       and the macOS app (src/Recorder.Mac). That is what lets either platform change without the
+       other noticing.
+
+       Plain net8.0 so both heads can consume it: the Windows app on net8.0-windows and the macOS
+       app on net10.0-macos. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Recorder</RootNamespace>
+    <AssemblyName>Recorder.Core</AssemblyName>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Version>1.0.0</Version>
+    <Product>Pomtom Recorder</Product>
+    <Company>Pomtom</Company>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- NAudio.Core only: buffering, resampling, filters and FFT, all managed code. The WASAPI and
+         WinMM halves of NAudio stay in the Windows app. -->
+    <PackageReference Include="NAudio.Core" Version="2.3.0" />
+    <PackageReference Include="Serilog" Version="4.4.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+  </ItemGroup>
+
+</Project>

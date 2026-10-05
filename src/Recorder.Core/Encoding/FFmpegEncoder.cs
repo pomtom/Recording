@@ -1,15 +1,18 @@
 using System.Diagnostics;
 using System.IO;
-using System.IO.Pipes;
 using System.Text;
+using Recorder.Platform;
 using Recorder.Utils;
 
 namespace Recorder.Encoding;
 
 /// <summary>
-/// Owns the ffmpeg child process and the two named pipes feeding it.
+/// Owns the ffmpeg child process and the two pipes feeding it.
 /// </summary>
 /// <remarks>
+/// <para>What a "pipe" is depends on the platform — a named pipe on Windows, a FIFO on macOS — and
+/// comes from the <see cref="IPipeTransport"/> passed in. The rules below hold for both.</para>
+///
 /// <para><b>The inputs connect in sequence, not in parallel.</b> ffmpeg opens input files one at a
 /// time, and for each one it runs <c>find_stream_info</c>, which blocks reading actual data before
 /// it moves on to the next input. So it connects the video pipe, then waits for video frames, and
@@ -40,8 +43,8 @@ public sealed class FFmpegEncoder : IAsyncDisposable
     private readonly string _ffmpegPath;
 
     private Process? _process;
-    private NamedPipeServerStream? _videoPipe;
-    private NamedPipeServerStream? _audioPipe;
+    private IPipeEndpoint? _videoPipe;
+    private IPipeEndpoint? _audioPipe;
     private Task? _stderrPump;
     private readonly StringBuilder _stderrTail = new();
     private readonly object _stderrGate = new();
@@ -50,7 +53,13 @@ public sealed class FFmpegEncoder : IAsyncDisposable
     private volatile bool _audioBroken;
     private volatile bool _completing;
 
-    private FFmpegEncoder(string ffmpegPath) => _ffmpegPath = ffmpegPath;
+    private readonly IPipeTransport _pipes;
+
+    private FFmpegEncoder(string ffmpegPath, IPipeTransport pipes)
+    {
+        _ffmpegPath = ffmpegPath;
+        _pipes = pipes;
+    }
 
     public VideoEncoder ActiveEncoder { get; private set; }
 
@@ -76,6 +85,7 @@ public sealed class FFmpegEncoder : IAsyncDisposable
         string ffmpegPath,
         EncodeSpec spec,
         VideoEncoder encoder,
+        IPipeTransport pipes,
         CancellationToken cancellationToken)
     {
         // Unique pipe names per recording: a previous ffmpeg may still hold the old ones briefly.
@@ -85,7 +95,7 @@ public sealed class FFmpegEncoder : IAsyncDisposable
             AudioPipeName = $"pomrec-a-{Guid.NewGuid():N}",
         };
 
-        var instance = new FFmpegEncoder(ffmpegPath);
+        var instance = new FFmpegEncoder(ffmpegPath, pipes);
         try
         {
             await instance.StartOnceAsync(attemptSpec, encoder, cancellationToken).ConfigureAwait(false);
@@ -127,15 +137,10 @@ public sealed class FFmpegEncoder : IAsyncDisposable
         // Create both pipe servers first so ffmpeg finds them the moment it looks.
         // The buffers are sized to roughly a third of a second of 1080p60 NV12 so a brief
         // scheduling hiccup in ffmpeg does not stall the pacer thread.
-        _videoPipe = new NamedPipeServerStream(
-            spec.VideoPipeName, PipeDirection.Out, 1, PipeTransmissionMode.Byte,
-            PipeOptions.Asynchronous, inBufferSize: 0, outBufferSize: 8 * 1024 * 1024);
+        _videoPipe = _pipes.Create(spec.VideoPipeName, bufferSize: 8 * 1024 * 1024);
+        _audioPipe = _pipes.Create(spec.AudioPipeName, bufferSize: 1 * 1024 * 1024);
 
-        _audioPipe = new NamedPipeServerStream(
-            spec.AudioPipeName, PipeDirection.Out, 1, PipeTransmissionMode.Byte,
-            PipeOptions.Asynchronous, inBufferSize: 0, outBufferSize: 1 * 1024 * 1024);
-
-        var args = FFmpegArgumentBuilder.BuildRecordArguments(spec, encoder);
+        var args = FFmpegArgumentBuilder.BuildRecordArguments(spec, encoder, _videoPipe.Path, _audioPipe.Path);
         var psi = new ProcessStartInfo(_ffmpegPath)
         {
             RedirectStandardError = true,

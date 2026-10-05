@@ -10,6 +10,7 @@ using NAudio.CoreAudioApi;
 using Recorder.Capture;
 using Recorder.Encoding;
 using Recorder.Hotkeys;
+using Recorder.Platform;
 using Recorder.Settings;
 using Recorder.Utils;
 
@@ -182,7 +183,7 @@ public partial class SettingsWindow : Window
             AudioBitrateCombo.Items.Add(new Choice<int>(bitrate, bitrate.ToString(CultureInfo.CurrentCulture)));
 
         EncoderCombo.Items.Add(new Choice<string>("Auto", "Automatic (recommended)"));
-        foreach (var encoder in Enum.GetValues<VideoEncoder>())
+        foreach (var encoder in WindowsPlatformServices.SelectableEncoders)
             EncoderCombo.Items.Add(new Choice<string>(encoder.ToString(), EncoderProbe.FriendlyName(encoder)));
 
         foreach (var level in Enum.GetValues<Settings.LogLevel>())

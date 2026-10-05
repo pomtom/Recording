@@ -8,6 +8,7 @@ using Recorder.Core;
 using Recorder.Encoding;
 using Recorder.Hotkeys;
 using Recorder.Overlay;
+using Recorder.Platform;
 using Recorder.Power;
 using Recorder.Recovery;
 using Recorder.Settings;
@@ -59,6 +60,8 @@ public partial class App : Application
             return;
         }
 
+        // Before anything that reads a path: settings, logging, journals, the ffmpeg cache.
+        AppPaths.Initialize(new WindowsPaths());
         AppPaths.EnsureDirectories();
         Log.Initialize();
 
@@ -105,22 +108,24 @@ public partial class App : Application
 
     private void BuildServices()
     {
-        _settings = new SettingsManager();
+        var platform = new WindowsPlatformServices();
+
+        _settings = new SettingsManager(new WindowsSettingsRules());
         _settings.Load();
 
         // Logging came up with defaults before this point, because Load itself reports a corrupt
         // settings file. Now that the user's preferences are known, apply them.
         Log.Reconfigure(_settings.Current.Logging);
 
-        _provisioner = new FFmpegProvisioner();
-        _encoderProbe = new EncoderProbe(_provisioner);
+        _provisioner = new FFmpegProvisioner(new WindowsFFmpegLocator());
+        _encoderProbe = new EncoderProbe(_provisioner, platform.HardwareEncoderCandidates);
         _finalizer = new Mp4Finalizer(_provisioner);
 
         // Built before the manager because every recording is handed the camera overlay, and
         // app-lifetime because the bubble is live while the app is idle.
         _cameras = new CameraController(_settings);
 
-        _manager = new RecordingManager(_settings, _provisioner, _encoderProbe, _finalizer, _cameras);
+        _manager = new RecordingManager(_settings, _provisioner, _encoderProbe, _finalizer, platform, _cameras);
         _manager.StateChanged += OnStateChanged;
         _manager.Completed += OnRecordingCompleted;
         _manager.ErrorOccurred += OnRecordingError;

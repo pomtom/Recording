@@ -63,6 +63,12 @@
     <Using Remove="System.Drawing" />
   </ItemGroup>
 
+  <!-- The platform-neutral recording engine. Everything Windows-specific stays in this project and
+       reaches Core through the interfaces in Recorder.Core/Platform (implemented under Platform/). -->
+  <ItemGroup>
+    <ProjectReference Include="..\Recorder.Core\Recorder.Core.csproj" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.3.0" />
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />

@@ -3,6 +3,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using Recorder.Capture;
 using Recorder.Overlay;
+using Recorder.Platform;
 using Recorder.Settings;
 using Recorder.Utils;
 
@@ -22,7 +23,7 @@ namespace Recorder.Core;
 /// <para>The one place it departs from mute is persistence. Mute resets with every recording;
 /// a camera that has been switched off stays off until it is switched back on.</para>
 /// </remarks>
-public sealed class CameraController : IDisposable
+public sealed class CameraController : IDisposable, ICameraHost
 {
     private readonly SettingsManager _settings;
     private readonly Dispatcher _dispatcher;
@@ -146,7 +147,7 @@ public sealed class CameraController : IDisposable
         _startCts = null;
 
         _compositor.Enabled = false;
-        _compositor.BubbleHandle = IntPtr.Zero;
+        _compositor.Bubble = null;
 
         CloseBubble();
 
@@ -222,7 +223,7 @@ public sealed class CameraController : IDisposable
         _bubble = bubble;
         bubble.Show();
 
-        _compositor.BubbleHandle = new WindowInteropHelper(bubble).Handle;
+        _compositor.Bubble = new WindowsBubbleRect(new WindowInteropHelper(bubble).Handle);
         ApplyStyle(options);
         ApplyRecordingVisibility();
     }
@@ -354,7 +355,7 @@ public sealed class CameraController : IDisposable
         if (_bubble is null || !IsEnabled) return;
 
         var handle = new WindowInteropHelper(_bubble).Handle;
-        if (CameraBubbleGeometry.IsCentredOn(handle, monitor)) return;
+        if (WindowsBubbleRect.TryGet(handle, out var window) && CameraBubbleGeometry.IsCentredOn(window, monitor)) return;
 
         var g = _bubble.Geometry;
         var margin = (int)Math.Round(_settings.Current.Camera.SnapMargin);
@@ -384,7 +385,7 @@ public sealed class CameraController : IDisposable
         _suspended = true;
 
         _compositor.Enabled = false;
-        _compositor.BubbleHandle = IntPtr.Zero;
+        _compositor.Bubble = null;
         CloseBubble();
         _camera.Stop();
     }

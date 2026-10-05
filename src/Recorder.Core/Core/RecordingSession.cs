@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Recorder.Capture;
 using Recorder.Encoding;
+using Recorder.Platform;
 using Recorder.Utils;
 
 namespace Recorder.Core;
@@ -10,9 +11,9 @@ namespace Recorder.Core;
 /// </summary>
 /// <remarks>
 /// The session owns the frame pacer — the thread that decides when a frame is written and is
-/// therefore what makes the output constant-frame-rate. Windows Graphics Capture only delivers a
-/// frame when the screen changes, so the pacer repeats the last captured frame whenever nothing
-/// has happened. It never <em>skips</em> a frame: in a raw CFR stream every frame occupies exactly
+/// therefore what makes the output constant-frame-rate. Screen capture APIs (Windows Graphics
+/// Capture, ScreenCaptureKit) only deliver a frame when the screen changes, so the pacer repeats
+/// the last captured frame whenever nothing has happened. It never <em>skips</em> a frame: in a raw CFR stream every frame occupies exactly
 /// 1/fps of the timeline, so a skipped frame would shorten the video relative to the audio and
 /// desync the two. If the encoder falls behind, the pacer catches up by writing the missed frames
 /// as fast as it can rather than dropping them.
@@ -29,7 +30,7 @@ public sealed class RecordingSession : IAsyncDisposable
     private readonly RecordingClock _clock = new();
     private readonly CancellationTokenSource _cts = new();
 
-    private ScreenCaptureService? _capture;
+    private IScreenCapture? _capture;
     private AudioCaptureService? _audio;
     private AudioMixer? _mixer;
     private FFmpegEncoder? _encoder;
@@ -38,12 +39,18 @@ public sealed class RecordingSession : IAsyncDisposable
     private byte[] _frameBuffer = [];
     private long _framesWritten;
     private bool _backlogReported;
-    private bool _timerResolutionRaised;
+    private IDisposable? _timerResolution;
 
     private int _failureRaised;
     private bool _disposed;
 
-    private RecordingSession(RecordingRequest request) => _request = request;
+    private readonly IPlatformServices _platform;
+
+    private RecordingSession(RecordingRequest request, IPlatformServices platform)
+    {
+        _request = request;
+        _platform = platform;
+    }
 
     /// <summary>Raised once when the recording cannot continue. The message is user-facing.</summary>
     public event EventHandler<string>? Failed;
@@ -71,11 +78,13 @@ public sealed class RecordingSession : IAsyncDisposable
     /// Opens capture, audio and the encoder. The timeline does not start until
     /// <see cref="BeginTimeline"/> is called, so a countdown can run against a warm pipeline.
     /// </summary>
-    public static async Task<RecordingSession> StartAsync(RecordingRequest request, CancellationToken cancellationToken)
+    public static async Task<RecordingSession> StartAsync(
+        RecordingRequest request, IPlatformServices platform, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(platform);
 
-        var session = new RecordingSession(request);
+        var session = new RecordingSession(request, platform);
         try
         {
             await session.InitializeAsync(cancellationToken).ConfigureAwait(false);
@@ -91,9 +100,11 @@ public sealed class RecordingSession : IAsyncDisposable
     private async Task InitializeAsync(CancellationToken cancellationToken)
     {
         // Capture first: its negotiated output size and pixel format determine the encoder spec.
-        _capture = new ScreenCaptureService();
+        _capture = _platform.CreateScreenCapture();
         _capture.CaptureLost += OnCaptureLost;
-        _capture.Start(_request.Monitor, _request.TargetHeight, _request.CaptureCursor, _request.SuppressCaptureBorder);
+        await _capture.StartAsync(
+            _request.Monitor, _request.TargetHeight, _request.CaptureCursor, _request.SuppressCaptureBorder)
+            .ConfigureAwait(false);
 
         Width = _capture.TargetWidth;
         Height = _capture.TargetHeight;
@@ -125,11 +136,11 @@ public sealed class RecordingSession : IAsyncDisposable
             _capture.PixelFormat, _request.Monitor));
 
         _encoder = await FFmpegEncoder.StartAsync(
-            _request.FFmpegPath, spec, _request.Encoder, cancellationToken).ConfigureAwait(false);
+            _request.FFmpegPath, spec, _request.Encoder, _platform.Pipes, cancellationToken).ConfigureAwait(false);
 
         EncoderDescription = EncoderProbe.FriendlyName(_encoder.ActiveEncoder);
 
-        _audio = new AudioCaptureService(_request.Settings);
+        _audio = new AudioCaptureService(_request.Settings, _platform.AudioEndpoints);
         _audio.Start(_request.RecordSystemAudio, _request.RecordMicrophone);
         AudioWarning = _audio.FailureSummary;
 
@@ -151,11 +162,10 @@ public sealed class RecordingSession : IAsyncDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_pacerThread is not null) return;
 
-        // The pacer needs finer sleep granularity than the default 15.6 ms scheduler tick.
+        // The pacer needs finer sleep granularity than the default scheduler tick (15.6 ms on Windows).
         try
         {
-            NativeMethods.TimeBeginPeriod(1);
-            _timerResolutionRaised = true;
+            _timerResolution = _platform.BeginHighResolutionTimer();
         }
         catch (Exception ex)
         {
@@ -450,10 +460,10 @@ public sealed class RecordingSession : IAsyncDisposable
         _capture = null;
         _encoder = null;
 
-        if (_timerResolutionRaised)
+        if (_timerResolution is not null)
         {
-            try { NativeMethods.TimeEndPeriod(1); } catch { }
-            _timerResolutionRaised = false;
+            try { _timerResolution.Dispose(); } catch { }
+            _timerResolution = null;
         }
 
         try { _cts.Dispose(); } catch { }

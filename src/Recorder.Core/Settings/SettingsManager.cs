@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using Recorder.Encoding;
-using Recorder.Hotkeys;
+using Recorder.Platform;
 using Recorder.Utils;
 
 namespace Recorder.Settings;
@@ -27,7 +27,17 @@ public sealed class SettingsManager
     };
 
     private readonly object _gate = new();
+    private readonly ISettingsRules _rules;
     private AppSettings _current = new();
+
+    /// <param name="rules">
+    /// The platform's idea of a valid colour and hotkey. Both are defined by the UI toolkit that will
+    /// eventually parse them, so they cannot be decided here.
+    /// </param>
+    public SettingsManager(ISettingsRules rules)
+    {
+        _rules = rules ?? throw new ArgumentNullException(nameof(rules));
+    }
 
     /// <summary>Raised after <see cref="Save"/> completes, on the caller's thread.</summary>
     public event EventHandler<AppSettings>? Changed;
@@ -149,7 +159,7 @@ public sealed class SettingsManager
     /// Split per section purely for readability; the contract is the same throughout — clamp, never
     /// reject, and never let a bad value reach the recording path.
     /// </remarks>
-    private static void Validate(AppSettings s)
+    private void Validate(AppSettings s)
     {
         s.SettingsVersion = CurrentVersion;
 
@@ -184,7 +194,7 @@ public sealed class SettingsManager
             s.MonitorDeviceId = null;
     }
 
-    private static void ValidateHotkeys(AppSettings s)
+    private void ValidateHotkeys(AppSettings s)
     {
         s.StartHotkey = NormalizeHotkey(s.StartHotkey, "Ctrl+Shift+R");
         s.PauseHotkey = NormalizeHotkey(s.PauseHotkey, "Ctrl+Shift+P");
@@ -264,7 +274,7 @@ public sealed class SettingsManager
         o.Scale = ClampDouble(o.Scale, 0.75, 2.0, 1.0);
     }
 
-    private static void ValidateCamera(AppSettings s)
+    private void ValidateCamera(AppSettings s)
     {
         var c = s.Camera ??= new CameraSettings();
 
@@ -290,7 +300,7 @@ public sealed class SettingsManager
         c.SnapDistance = ClampDouble(c.SnapDistance, 0, 600, 160);
         c.SnapMargin = ClampDouble(c.SnapMargin, 0, 300, 32);
 
-        if (!IsParsableColor(c.BorderColor)) c.BorderColor = "#FFFFFFFF";
+        if (!_rules.IsValidColor(c.BorderColor)) c.BorderColor = "#FFFFFFFF";
 
         // A saved position is only meaningful as a pair; half of one would place the bubble at zero
         // on the other axis, which is not where the user left it.
@@ -299,19 +309,6 @@ public sealed class SettingsManager
             c.Left = null;
             c.Top = null;
         }
-    }
-
-    /// <summary>Whether a colour string is one WPF can parse, without throwing to find out.</summary>
-    private static bool IsParsableColor(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return false;
-        try
-        {
-            System.Windows.Media.ColorConverter.ConvertFromString(value);
-            return true;
-        }
-        catch (FormatException) { return false; }
-        catch (NotSupportedException) { return false; }
     }
 
     private static void ValidateBehavior(AppSettings s)
@@ -337,10 +334,10 @@ public sealed class SettingsManager
     private static double ClampDouble(double value, double min, double max, double fallback) =>
         double.IsFinite(value) ? Math.Clamp(value, min, max) : fallback;
 
-    private static string NormalizeHotkey(string? value, string fallback)
+    private string NormalizeHotkey(string? value, string fallback)
     {
-        if (HotkeyGesture.TryParse(value, out var gesture) && gesture is not null)
-            return gesture.ToString();
+        if (_rules.TryNormalizeHotkey(value, out var normalized))
+            return normalized;
 
         if (!string.IsNullOrWhiteSpace(value))
             Log.Warn($"Unrecognised hotkey '{value}'; using {fallback}.");
@@ -349,12 +346,12 @@ public sealed class SettingsManager
     }
 
     /// <summary>Normalises a hotkey that is allowed to be absent. Blank stays blank.</summary>
-    private static string NormalizeOptionalHotkey(string? value)
+    private string NormalizeOptionalHotkey(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return string.Empty;
 
-        if (HotkeyGesture.TryParse(value, out var gesture) && gesture is not null)
-            return gesture.ToString();
+        if (_rules.TryNormalizeHotkey(value, out var normalized))
+            return normalized;
 
         Log.Warn($"Unrecognised hotkey '{value}'; leaving it unassigned.");
         return string.Empty;

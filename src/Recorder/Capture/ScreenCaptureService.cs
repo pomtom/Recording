@@ -1,4 +1,5 @@
 using Recorder.Encoding;
+using Recorder.Platform;
 using Recorder.Utils;
 using Vortice.Direct3D;
 using Vortice.Direct3D11;
@@ -24,7 +25,7 @@ namespace Recorder.Capture;
 /// holding the latest complete frame, one possibly being read. Three is the minimum that lets the
 /// capture callback and the pacer run concurrently without ever blocking each other.</para>
 /// </remarks>
-public sealed class ScreenCaptureService : IDisposable
+public sealed class ScreenCaptureService : IScreenCapture
 {
     private const int BufferCount = 3;
 
@@ -87,6 +88,13 @@ public sealed class ScreenCaptureService : IDisposable
     /// </summary>
     /// <param name="targetHeight">Desired output height, or null to keep the native size.</param>
     /// <param name="suppressBorder">Hide the Windows 11 "being captured" border. No effect on Win10.</param>
+    Task IScreenCapture.StartAsync(MonitorInfo monitor, int? targetHeight, bool captureCursor, bool suppressBorder)
+    {
+        // WGC opens synchronously; the interface is async for platforms whose capture APIs are not.
+        Start(monitor, targetHeight, captureCursor, suppressBorder);
+        return Task.CompletedTask;
+    }
+
     public void Start(MonitorInfo monitor, int? targetHeight, bool captureCursor, bool suppressBorder = true)
     {
         ArgumentNullException.ThrowIfNull(monitor);
@@ -110,7 +118,7 @@ public sealed class ScreenCaptureService : IDisposable
             if (sourceWidth <= 0 || sourceHeight <= 0)
                 throw new InvalidOperationException($"The monitor reported an unusable size ({sourceWidth}×{sourceHeight}).");
 
-            var (targetW, targetH) = ComputeTargetSize(sourceWidth, sourceHeight, targetHeight);
+            var (targetW, targetH) = CaptureSizing.ComputeTargetSize(sourceWidth, sourceHeight, targetHeight);
 
             _converter = FrameConverter.Create(_device!, _context!, sourceWidth, sourceHeight, targetW, targetH);
             AllocateBuffers(_converter.FrameBytes);
@@ -135,18 +143,6 @@ public sealed class ScreenCaptureService : IDisposable
                      $"{_converter.OutputWidth}×{_converter.OutputHeight} " +
                      $"{_converter.PixelFormat} (GPU conversion: {_converter.UsesGpuConversion}).");
         }
-    }
-
-    /// <summary>Derives an even-sided output size that preserves the monitor's aspect ratio.</summary>
-    public static (int Width, int Height) ComputeTargetSize(int sourceWidth, int sourceHeight, int? targetHeight)
-    {
-        // Never upscale: asking for 1440p on a 1080p monitor just wastes bitrate.
-        if (targetHeight is null || targetHeight.Value >= sourceHeight)
-            return (sourceWidth & ~1, sourceHeight & ~1);
-
-        var height = targetHeight.Value;
-        var width = (int)Math.Round(sourceWidth * (double)height / sourceHeight);
-        return (Math.Max(2, width & ~1), Math.Max(2, height & ~1));
     }
 
     private void CreateDevice()

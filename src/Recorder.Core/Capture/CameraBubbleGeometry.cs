@@ -1,5 +1,3 @@
-using Recorder.Utils;
-
 namespace Recorder.Capture;
 
 /// <summary>A rectangle in output-frame pixels.</summary>
@@ -18,24 +16,28 @@ public readonly record struct PixelRect(int X, int Y, int Width, int Height)
 /// looks like what was on screen. A second implementation of "which bit of the camera do we show"
 /// is a second chance to disagree.</para>
 ///
-/// <para>Everything is done in physical pixels via <c>GetWindowRect</c>. It is tempting to convert
-/// WPF's device-independent <c>Left</c>/<c>Top</c> with <c>GetMonitorScale</c>, but WPF's global DIP
-/// space maps to physical pixels per-monitor-affinely, so a single scale factor is only right when
-/// every monitor shares one DPI — and the error grows with distance from the origin, which makes it
-/// invisible on exactly the single-monitor machines it gets tested on.</para>
+/// <para>Everything is done in physical pixels. On Windows they come from <c>GetWindowRect</c>. It
+/// is tempting to convert WPF's device-independent <c>Left</c>/<c>Top</c> with
+/// <c>GetMonitorScale</c> instead, but WPF's global DIP space maps to physical pixels
+/// per-monitor-affinely, so a single scale factor is only right when every monitor shares one DPI —
+/// and the error grows with distance from the origin, which makes it invisible on exactly the
+/// single-monitor machines it gets tested on.</para>
 /// </remarks>
 public static class CameraBubbleGeometry
 {
     /// <summary>
     /// Maps the bubble window onto the output frame.
     /// </summary>
-    /// <param name="hwnd">The bubble window's handle.</param>
+    /// <param name="window">
+    /// The bubble window's bounds, in the same physical desktop pixels as the monitor's (on Windows,
+    /// <c>GetWindowRect</c>).
+    /// </param>
     /// <param name="monitor">The monitor being recorded; its bounds are physical pixels.</param>
     /// <param name="sourceWidth">Capture source width, in physical pixels.</param>
     /// <param name="outputWidth">Frame width the encoder receives.</param>
-    /// <returns>False when the window is gone or lands entirely outside the frame.</returns>
+    /// <returns>False when the window lands entirely outside the frame.</returns>
     public static bool TryComputeTargetRect(
-        IntPtr hwnd,
+        PixelRect window,
         MonitorInfo monitor,
         int sourceWidth,
         int sourceHeight,
@@ -45,12 +47,11 @@ public static class CameraBubbleGeometry
     {
         rect = default;
 
-        if (hwnd == IntPtr.Zero || sourceWidth <= 0 || sourceHeight <= 0) return false;
-        if (!NativeMethods.GetWindowRect(hwnd, out var window)) return false;
+        if (sourceWidth <= 0 || sourceHeight <= 0) return false;
 
-        // Monitor-relative, still physical pixels — rcMonitor and GetWindowRect share a space.
-        var left = window.Left - monitor.Left;
-        var top = window.Top - monitor.Top;
+        // Monitor-relative, still physical pixels — the monitor and window bounds share a space.
+        var left = window.X - monitor.Left;
+        var top = window.Y - monitor.Top;
 
         // The recording may be downscaled from the monitor's native size.
         var scaleX = outputWidth / (double)sourceWidth;
@@ -101,13 +102,11 @@ public static class CameraBubbleGeometry
     }
 
     /// <summary>Whether a window's centre lies on a given monitor.</summary>
-    public static bool IsCentredOn(IntPtr hwnd, MonitorInfo monitor)
+    /// <param name="window">The window's bounds, in the monitor's physical pixel space.</param>
+    public static bool IsCentredOn(PixelRect window, MonitorInfo monitor)
     {
-        if (hwnd == IntPtr.Zero) return false;
-        if (!NativeMethods.GetWindowRect(hwnd, out var r)) return false;
-
-        var cx = r.Left + (r.Width / 2);
-        var cy = r.Top + (r.Height / 2);
+        var cx = window.X + (window.Width / 2);
+        var cy = window.Y + (window.Height / 2);
 
         return cx >= monitor.Left && cx < monitor.Left + monitor.Width &&
                cy >= monitor.Top && cy < monitor.Top + monitor.Height;

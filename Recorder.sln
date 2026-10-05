@@ -1,8 +1,11 @@
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Recorder", "src\Recorder\Recorder.csproj", "{3F2A7C41-5B8E-4C1D-9E6A-2D4B8F1C7A93}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Recorder.Core", "src\Recorder.Core\Recorder.Core.csproj", "{76D6ACAE-D742-4C02-BBC2-6B54950D7CCF}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -14,6 +17,10 @@ Global
 		{3F2A7C41-5B8E-4C1D-9E6A-2D4B8F1C7A93}.Debug|x64.Build.0 = Debug|x64
 		{3F2A7C41-5B8E-4C1D-9E6A-2D4B8F1C7A93}.Release|x64.ActiveCfg = Release|x64
 		{3F2A7C41-5B8E-4C1D-9E6A-2D4B8F1C7A93}.Release|x64.Build.0 = Release|x64
+		{76D6ACAE-D742-4C02-BBC2-6B54950D7CCF}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{76D6ACAE-D742-4C02-BBC2-6B54950D7CCF}.Debug|x64.Build.0 = Debug|Any CPU
+		{76D6ACAE-D742-4C02-BBC2-6B54950D7CCF}.Release|x64.ActiveCfg = Release|Any CPU
+		{76D6ACAE-D742-4C02-BBC2-6B54950D7CCF}.Release|x64.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

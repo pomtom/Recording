@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Recorder.Platform;
 using Recorder.Utils;
 using Windows.Graphics.Imaging;
 using Windows.Media.Capture;
@@ -8,8 +9,7 @@ using WinRT;
 
 namespace Recorder.Capture;
 
-/// <summary>A camera that can be used for the bubble.</summary>
-public sealed record CameraDeviceInfo(string DeviceId, string FriendlyName);
+// CameraDeviceInfo lives in Recorder.Core (Capture/CameraDeviceInfo.cs).
 
 /// <summary>
 /// Captures webcam frames and keeps the newest one ready as packed BGRA.
@@ -29,7 +29,7 @@ public sealed record CameraDeviceInfo(string DeviceId, string FriendlyName);
 /// keeps the bubble live in a recording of a still screen: the pacer asks for the newest frame on
 /// every frame it writes, rather than waiting to be told one exists.</para>
 /// </remarks>
-public sealed class CameraCaptureService : IDisposable
+public sealed class CameraCaptureService : IDisposable, ICameraSource
 {
     private const int BufferCount = 3;
 

@@ -1,9 +1,10 @@
 using System.IO;
 using System.IO.Compression;
 using System.Reflection;
+using Recorder.Encoding;
 using Recorder.Utils;
 
-namespace Recorder.Encoding;
+namespace Recorder.Platform;
 
 /// <summary>
 /// Finds a usable ffmpeg.exe, extracting the embedded copy if necessary.
@@ -17,26 +18,19 @@ namespace Recorder.Encoding;
 /// A side-by-side ffmpeg.exe wins over the embedded one, which makes it easy to swap in a different
 /// build for troubleshooting without rebuilding the app.
 /// </para>
+/// <para>
+/// This class has to live in the Windows app rather than in Core: the resource is embedded in
+/// Recorder.exe, and <see cref="Assembly.GetExecutingAssembly"/> is what finds it.
+/// </para>
 /// </remarks>
-public sealed class FFmpegProvisioner
+public sealed class WindowsFFmpegLocator : IFFmpegLocator
 {
     private const string ResourceName = "Recorder.assets.ffmpeg.exe.gz";
 
-    private readonly object _gate = new();
-    private string? _resolved;
+    public string UnavailableMessage =>
+        "FFmpeg could not be located. Place ffmpeg.exe next to Recorder.exe or install it on PATH.";
 
-    /// <summary>Absolute path to ffmpeg.exe. Throws <see cref="FFmpegUnavailableException"/> if none can be found.</summary>
-    public string GetFFmpegPath()
-    {
-        lock (_gate)
-        {
-            if (_resolved is not null && File.Exists(_resolved)) return _resolved;
-            _resolved = Resolve();
-            return _resolved;
-        }
-    }
-
-    private static string Resolve()
+    public string? TryLocate()
     {
         // 1. Next to the exe — an explicit override, and how the "ship alongside" layout works.
         var sideBySide = Path.Combine(AppPaths.ExeDirectory, "ffmpeg.exe");
@@ -56,11 +50,7 @@ public sealed class FFmpegProvisioner
         }
 
         // 4. Anything on PATH.
-        var onPath = FindOnPath("ffmpeg.exe");
-        if (onPath is not null) return onPath;
-
-        throw new FFmpegUnavailableException(
-            "FFmpeg could not be located. Place ffmpeg.exe next to Recorder.exe or install it on PATH.");
+        return FindOnPath("ffmpeg.exe");
     }
 
     /// <summary>
@@ -82,7 +72,7 @@ public sealed class FFmpegProvisioner
 
         var target = Path.Combine(AppPaths.BinDirectory, "ffmpeg.exe");
         var stampPath = Path.Combine(AppPaths.BinDirectory, "ffmpeg.stamp");
-        var stamp = typeof(FFmpegProvisioner).Assembly.GetName().Version?.ToString() ?? "0";
+        var stamp = typeof(WindowsFFmpegLocator).Assembly.GetName().Version?.ToString() ?? "0";
 
         if (File.Exists(target) && File.Exists(stampPath))
         {
@@ -158,9 +148,4 @@ public sealed class FFmpegProvisioner
         }
         return null;
     }
-}
-
-public sealed class FFmpegUnavailableException : Exception
-{
-    public FFmpegUnavailableException(string message) : base(message) { }
 }

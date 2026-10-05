@@ -1,6 +1,7 @@
 using System.IO;
 using Recorder.Capture;
 using Recorder.Encoding;
+using Recorder.Platform;
 using Recorder.Recovery;
 using Recorder.Settings;
 using Recorder.Utils;
@@ -35,7 +36,8 @@ public sealed class RecordingManager : IAsyncDisposable
     private readonly FFmpegProvisioner _provisioner;
     private readonly EncoderProbe _encoderProbe;
     private readonly Mp4Finalizer _finalizer;
-    private readonly CameraController? _cameras;
+    private readonly IPlatformServices _platform;
+    private readonly ICameraHost? _cameras;
 
     private readonly SemaphoreSlim _commandLock = new(1, 1);
 
@@ -44,6 +46,7 @@ public sealed class RecordingManager : IAsyncDisposable
     private RecorderState _state = RecorderState.Idle;
     private bool _disposed;
 
+    /// <param name="platform">The OS services every recording is built from.</param>
     /// <param name="cameras">
     /// The camera bubble, or null when there is none. Optional because a recording is complete
     /// without one — every camera failure has to leave the screen recording running, and the
@@ -54,12 +57,14 @@ public sealed class RecordingManager : IAsyncDisposable
         FFmpegProvisioner provisioner,
         EncoderProbe encoderProbe,
         Mp4Finalizer finalizer,
-        CameraController? cameras = null)
+        IPlatformServices platform,
+        ICameraHost? cameras = null)
     {
         _settings = settings;
         _provisioner = provisioner;
         _encoderProbe = encoderProbe;
         _finalizer = finalizer;
+        _platform = platform;
         _cameras = cameras;
     }
 
@@ -176,7 +181,7 @@ public sealed class RecordingManager : IAsyncDisposable
 
         ResetMute();
 
-        var monitor = MonitorEnumerator.Select(settings.MonitorDeviceId)
+        var monitor = MonitorSelection.Select(_platform.Displays.Enumerate(), settings.MonitorDeviceId)
             ?? throw new InvalidOperationException("No display was found to record.");
 
         // Probe the folder now rather than at the moment ffmpeg tries to write, so the fallback
@@ -223,7 +228,7 @@ public sealed class RecordingManager : IAsyncDisposable
 
         _journalId = RecordingJournal.Write(partPath, finalPath);
 
-        var session = await RecordingSession.StartAsync(request, CancellationToken.None).ConfigureAwait(false);
+        var session = await RecordingSession.StartAsync(request, _platform, CancellationToken.None).ConfigureAwait(false);
         session.Failed += OnSessionFailed;
         _session = session;
 

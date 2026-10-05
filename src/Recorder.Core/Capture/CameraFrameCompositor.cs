@@ -1,4 +1,5 @@
 using Recorder.Encoding;
+using Recorder.Platform;
 using Recorder.Settings;
 using Recorder.Utils;
 
@@ -63,7 +64,7 @@ public sealed class CameraFrameCompositor : IVideoFrameOverlay
     /// </remarks>
     private static readonly TimeSpan StaleAfter = TimeSpan.FromSeconds(2);
 
-    private readonly CameraCaptureService _camera;
+    private readonly ICameraSource _camera;
     private readonly CameraSprite _sprite = new();
     private readonly object _gate = new();
 
@@ -81,26 +82,26 @@ public sealed class CameraFrameCompositor : IVideoFrameOverlay
     private BubbleStyle _bakedStyle;
     private bool _staleLogged;
 
-    public CameraFrameCompositor(CameraCaptureService camera)
+    public CameraFrameCompositor(ICameraSource camera)
     {
         _camera = camera ?? throw new ArgumentNullException(nameof(camera));
     }
 
     /// <summary>
-    /// The bubble window's handle. Zero suppresses the overlay entirely.
+    /// Where the bubble window is. Null suppresses the overlay entirely.
     /// </summary>
     /// <remarks>
     /// Written from the UI thread when the bubble opens or closes and read from the pacer thread
-    /// every frame, so it is a plain volatile word rather than anything lock-shaped — the value is
-    /// self-consistent either way and a frame either side of the change is harmless.
+    /// every frame, so it is a plain volatile reference rather than anything lock-shaped — the value
+    /// is self-consistent either way and a frame either side of the change is harmless.
     /// </remarks>
-    public IntPtr BubbleHandle
+    public IBubbleRectProvider? Bubble
     {
-        get => (IntPtr)Volatile.Read(ref _bubbleHandle);
-        set => Volatile.Write(ref _bubbleHandle, (long)value);
+        get => Volatile.Read(ref _bubble);
+        set => Volatile.Write(ref _bubble, value);
     }
 
-    private long _bubbleHandle;
+    private IBubbleRectProvider? _bubble;
 
     /// <summary>Whether the camera should currently be drawn.</summary>
     public bool Enabled
@@ -193,11 +194,11 @@ public sealed class CameraFrameCompositor : IVideoFrameOverlay
     /// <summary>Caller holds the gate.</summary>
     private bool TryUpdateRect()
     {
-        var handle = BubbleHandle;
-        if (handle == IntPtr.Zero) return false;
+        var bubble = Bubble;
+        if (bubble is null || !bubble.TryGetBounds(out var window)) return false;
 
         if (!CameraBubbleGeometry.TryComputeTargetRect(
-                handle, _target.Monitor,
+                window, _target.Monitor,
                 _target.SourceWidth, _target.SourceHeight,
                 _target.OutputWidth, _target.OutputHeight,
                 out var rect))

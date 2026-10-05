@@ -1,7 +1,7 @@
-using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 using Recorder.Capture.Dsp;
+using Recorder.Platform;
 using Recorder.Settings;
 using Recorder.Utils;
 
@@ -37,13 +37,16 @@ public sealed class AudioCaptureService : IDisposable
     private static readonly TimeSpan BufferDuration = TimeSpan.FromSeconds(5);
 
     private readonly AppSettings _settings;
+    private readonly IAudioEndpointFactory _endpoints;
     private readonly List<AudioSource> _sources = [];
     private readonly List<string> _failures = [];
     private bool _disposed;
 
-    public AudioCaptureService(AppSettings settings)
+    /// <param name="endpoints">Opens the platform's devices; everything after that is shared.</param>
+    public AudioCaptureService(AppSettings settings, IAudioEndpointFactory endpoints)
     {
         _settings = settings;
+        _endpoints = endpoints;
         SampleRate = settings.Audio.SampleRate;
         Channels = settings.Audio.Channels;
     }
@@ -97,17 +100,11 @@ public sealed class AudioCaptureService : IDisposable
         }
     }
 
-    private IWaveIn CreateLoopbackCapture()
-    {
-        var device = AudioDeviceEnumerator.GetDevice(_settings.Audio.SystemAudioDeviceId, DataFlow.Render);
-        return new WasapiLoopbackCapture(device);
-    }
+    private IWaveIn CreateLoopbackCapture() =>
+        _endpoints.CreateSystemAudioCapture(_settings.Audio.SystemAudioDeviceId);
 
-    private IWaveIn CreateMicrophoneCapture()
-    {
-        var device = AudioDeviceEnumerator.GetDevice(_settings.Audio.MicrophoneDeviceId, DataFlow.Capture);
-        return new WasapiCapture(device);
-    }
+    private IWaveIn CreateMicrophoneCapture() =>
+        _endpoints.CreateMicrophoneCapture(_settings.Audio.MicrophoneDeviceId);
 
     /// <summary>
     /// Discards everything queued beyond <paramref name="keep"/>.

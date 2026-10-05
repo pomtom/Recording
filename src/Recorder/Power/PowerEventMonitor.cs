@@ -3,14 +3,7 @@ using Recorder.Utils;
 
 namespace Recorder.Power;
 
-/// <summary>Why the system asked the recording to stop.</summary>
-public enum PowerStopReason
-{
-    Sleep,
-    Lock,
-    LogOff,
-    Shutdown,
-}
+// PowerStopReason lives in Recorder.Core (Power/PowerStopReason.cs).
 
 /// <summary>
 /// Watches for the system events that make continuing a recording pointless or impossible.

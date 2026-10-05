@@ -4,13 +4,21 @@ using Recorder.Utils;
 
 namespace Recorder.Encoding;
 
-/// <summary>An H.264 encoder ffmpeg can be asked to use, best first.</summary>
+/// <summary>An H.264 encoder ffmpeg can be asked to use.</summary>
+/// <remarks>
+/// Which of these a platform actually tries, and in what order, comes from
+/// <see cref="Platform.IPlatformServices.HardwareEncoderCandidates"/>. The values are persisted by
+/// name, so new members go at the end.
+/// </remarks>
 public enum VideoEncoder
 {
     Nvenc,
     QuickSync,
     Amf,
     X264,
+
+    /// <summary>Apple's hardware encoder (macOS only).</summary>
+    VideoToolbox,
 }
 
 /// <summary>
@@ -33,6 +41,7 @@ public sealed class EncoderProbe
     private static readonly TimeSpan ValidationTimeout = TimeSpan.FromSeconds(20);
 
     private readonly FFmpegProvisioner _provisioner;
+    private readonly IReadOnlyList<VideoEncoder> _hardwareCandidates;
     private readonly object _gate = new();
 
     /// <summary>Validation results for encoders the user asked for explicitly, so each is tested once.</summary>
@@ -40,13 +49,22 @@ public sealed class EncoderProbe
 
     private VideoEncoder? _cached;
 
-    public EncoderProbe(FFmpegProvisioner provisioner) => _provisioner = provisioner;
+    /// <param name="hardwareCandidates">
+    /// The hardware encoders this platform can have, best first. libx264 is always the fallback and
+    /// is not listed.
+    /// </param>
+    public EncoderProbe(FFmpegProvisioner provisioner, IReadOnlyList<VideoEncoder> hardwareCandidates)
+    {
+        _provisioner = provisioner;
+        _hardwareCandidates = hardwareCandidates;
+    }
 
     public static string EncoderName(VideoEncoder encoder) => encoder switch
     {
         VideoEncoder.Nvenc => "h264_nvenc",
         VideoEncoder.QuickSync => "h264_qsv",
         VideoEncoder.Amf => "h264_amf",
+        VideoEncoder.VideoToolbox => "h264_videotoolbox",
         _ => "libx264",
     };
 
@@ -55,6 +73,7 @@ public sealed class EncoderProbe
         VideoEncoder.Nvenc => "NVIDIA NVENC",
         VideoEncoder.QuickSync => "Intel Quick Sync",
         VideoEncoder.Amf => "AMD AMF",
+        VideoEncoder.VideoToolbox => "Apple VideoToolbox",
         _ => "Software (x264)",
     };
 
@@ -117,7 +136,7 @@ public sealed class EncoderProbe
         var built = ListBuiltInEncoders();
         var chosen = VideoEncoder.X264;
 
-        foreach (var candidate in new[] { VideoEncoder.Nvenc, VideoEncoder.QuickSync, VideoEncoder.Amf })
+        foreach (var candidate in _hardwareCandidates)
         {
             if (!built.Contains(EncoderName(candidate))) continue;
             if (!Validate(candidate)) continue;
@@ -255,7 +274,7 @@ public sealed class EncoderProbe
                 return found;
             }
 
-            foreach (var name in new[] { "h264_nvenc", "h264_qsv", "h264_amf", "libx264" })
+            foreach (var name in _hardwareCandidates.Select(EncoderName).Append(EncoderName(VideoEncoder.X264)))
             {
                 if (output.Contains(name, StringComparison.OrdinalIgnoreCase)) found.Add(name);
             }

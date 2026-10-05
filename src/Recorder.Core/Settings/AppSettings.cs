@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Recorder.Utils;
 
 namespace Recorder.Settings;
 
@@ -46,7 +47,8 @@ public sealed class AppSettings
     /// </remarks>
     public int SettingsVersion { get; set; }
 
-    public string OutputFolder { get; set; } = @"D:\Recordings";
+    /// <summary>Starts as the platform default — <c>D:\Recordings</c> on Windows.</summary>
+    public string OutputFolder { get; set; } = AppPaths.DefaultOutputFolder;
 
     /// <summary>One of <c>720p</c>, <c>1080p</c>, <c>1440p</c>, <c>Native</c>, <c>Custom</c>.</summary>
     public string Resolution { get; set; } = "1080p";

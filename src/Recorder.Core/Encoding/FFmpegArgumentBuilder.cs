@@ -15,7 +15,10 @@ namespace Recorder.Encoding;
 /// </remarks>
 public static class FFmpegArgumentBuilder
 {
-    public static List<string> BuildRecordArguments(EncodeSpec spec, VideoEncoder encoder)
+    /// <param name="videoInput">What ffmpeg opens to read raw frames (a platform pipe path).</param>
+    /// <param name="audioInput">What ffmpeg opens to read raw PCM.</param>
+    public static List<string> BuildRecordArguments(
+        EncodeSpec spec, VideoEncoder encoder, string videoInput, string audioInput)
     {
         var args = new List<string>
         {
@@ -30,14 +33,14 @@ public static class FFmpegArgumentBuilder
         args.AddRange(["-pixel_format", spec.PixelFormat == FramePixelFormat.Nv12 ? "nv12" : "bgra"]);
         args.AddRange(["-video_size", $"{spec.Width}x{spec.Height}"]);
         args.AddRange(["-framerate", spec.Fps.ToString(CultureInfo.InvariantCulture)]);
-        args.AddRange(["-i", PipePath(spec.VideoPipeName)]);
+        args.AddRange(["-i", videoInput]);
 
         // --- audio input ---
         args.AddRange(["-thread_queue_size", "1024"]);
         args.AddRange(["-f", "s16le"]);
         args.AddRange(["-ar", spec.AudioSampleRate.ToString(CultureInfo.InvariantCulture)]);
         args.AddRange(["-ac", spec.AudioChannels.ToString(CultureInfo.InvariantCulture)]);
-        args.AddRange(["-i", PipePath(spec.AudioPipeName)]);
+        args.AddRange(["-i", audioInput]);
 
         args.AddRange(["-map", "0:v:0"]);
         args.AddRange(["-map", "1:a:0"]);
@@ -148,6 +151,4 @@ public static class FFmpegArgumentBuilder
             ],
         };
     }
-
-    public static string PipePath(string pipeName) => $@"\\.\pipe\{pipeName}";
 }

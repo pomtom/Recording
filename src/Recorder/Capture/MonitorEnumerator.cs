@@ -3,24 +3,8 @@ using static Recorder.Utils.NativeMethods;
 
 namespace Recorder.Capture;
 
-/// <summary>A monitor that can be recorded.</summary>
-/// <param name="Handle">HMONITOR — valid only for the current display arrangement.</param>
-/// <param name="DeviceId">Stable-ish device name such as <c>\\.\DISPLAY1</c>, persisted in settings.</param>
-/// <param name="FriendlyName">Adapter/monitor description for the settings dropdown.</param>
-/// <param name="Bounds">Position and size in <em>physical</em> pixels.</param>
-public sealed record MonitorInfo(
-    IntPtr Handle,
-    string DeviceId,
-    string FriendlyName,
-    int Left,
-    int Top,
-    int Width,
-    int Height,
-    bool IsPrimary)
-{
-    public string DisplayLabel =>
-        $"{FriendlyName} — {Width}×{Height}{(IsPrimary ? " (primary)" : string.Empty)}";
-}
+// MonitorInfo itself lives in Recorder.Core (Capture/MonitorInfo.cs). On Windows its Handle is an
+// HMONITOR and its DeviceId a name such as \\.\DISPLAY1.
 
 /// <summary>
 /// Lists the monitors available to record.
@@ -81,22 +65,7 @@ public static class MonitorEnumerator
     }
 
     /// <summary>Finds the configured monitor, falling back to primary when it is gone.</summary>
-    public static MonitorInfo? Select(string? deviceId)
-    {
-        var all = Enumerate();
-        if (all.Count == 0) return null;
-
-        if (!string.IsNullOrWhiteSpace(deviceId))
-        {
-            var match = all.FirstOrDefault(m => string.Equals(m.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase));
-            if (match is not null) return match;
-
-            // The saved monitor was unplugged or renamed — recording on primary beats not recording.
-            Log.Warn($"Configured monitor '{deviceId}' not found; using the primary display.");
-        }
-
-        return all.FirstOrDefault(m => m.IsPrimary) ?? all[0];
-    }
+    public static MonitorInfo? Select(string? deviceId) => MonitorSelection.Select(Enumerate(), deviceId);
 
     private static string DescribeDevice(string deviceName)
     {
